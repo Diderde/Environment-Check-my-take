@@ -23,6 +23,7 @@ import re
 COMMAND_CACHE = {}
 COMMAND_CACHE_LOCK = threading.Lock()
 
+# 【质量缺陷】编码尝试顺序错误：中文Windows下locale(cp936)最先尝试，部分UTF-8字节序列在GBK下也能"成功"解码成乱码；应先严格UTF-8、失败再回退locale/GBK
 def decode_output(data):
     if isinstance(data, str):
         return data
@@ -106,6 +107,7 @@ def cleanup_temp_files(file_list):
 def get_memory_info():
     try:
         if platform.system() == "Windows":
+            # 【质量缺陷】wmic自Win11 24H2起默认移除，该类系统上此检查必然失败；应改用ctypes GlobalMemoryStatusEx或Get-CimInstance
             success, output = run_command("wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /value", shell=True, timeout=3, use_cache=True)
             if success:
                 lines = [l for l in output.split('\n') if '=' in l]
@@ -128,6 +130,7 @@ def get_cpu_info():
     results = []
     try:
         if platform.system() == "Windows":
+            # 【质量缺陷】wmic在新版Windows上已默认移除（见get_memory_info注释），CPU检测随之失败
             success, name = run_command("wmic cpu get Name", shell=True, timeout=3, use_cache=True)
             if success:
                 names = [l.strip() for l in name.split('\n') if l.strip() and 'Name' not in l]
@@ -152,6 +155,7 @@ def get_cpu_info():
 
 def get_gpu_info():
     results = []
+    # 【质量缺陷】超时仅3秒：首次调用需初始化驱动常需3-8秒；未走use_cache每次刷新重跑；未装NVIDIA卡或驱动时报"❌不可用"
     success, output = run_command("nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader", shell=True, timeout=3)
     if success:
         for line in output.split('\n'):
@@ -162,6 +166,7 @@ def get_gpu_info():
     
     try:
         if platform.system() == "Windows":
+            # 【质量缺陷】wmic缺失系统上显卡检测必然失败
             success, output = run_command("wmic path win32_VideoController get Name", shell=True, timeout=3, use_cache=True)
             if success:
                 gpus = [l.strip() for l in output.split('\n') if l.strip() and 'Name' not in l]
@@ -181,6 +186,7 @@ def get_battery_status():
     results = []
     try:
         if platform.system() == "Windows":
+            # 【质量缺陷】wmic缺失系统上电池检测必然失败
             success_est, est_out = run_command("wmic path win32_battery get EstimatedChargeRemaining /value", shell=True, timeout=3, use_cache=True)
             success_sta, sta_out = run_command("wmic path win32_battery get BatteryStatus /value", shell=True, timeout=3, use_cache=True)
             
@@ -238,6 +244,7 @@ def get_battery_status():
 def get_system_uptime():
     try:
         if platform.system() == "Windows":
+            # 【质量缺陷】wmic缺失系统上开机时长必然无法获取
             success, output = run_command("wmic os get LastBootUpTime", shell=True, timeout=3, use_cache=True)
             if success:
                 lines = [l.strip() for l in output.split('\n') if l.strip() and 'LastBoot' not in l]
@@ -279,6 +286,7 @@ def test_ssl_certificates():
             f"CA证书目录: {cert_paths.capath or '未设置'}"
         ]
         try:
+            # 【质量缺陷】响应未用with关闭，靠GC回收socket
             urllib.request.urlopen('https://pypi.org', timeout=3, context=context)
             results.append("HTTPS连接测试: ✅ 正常")
         except Exception as e:
@@ -352,6 +360,7 @@ def get_python_compile_info():
     except Exception as e:
         return [f"编译信息获取失败: {type(e).__name__}: {str(e)[:80]}"]
 
+# 【质量缺陷】issues列表初始化后从未写入、恒为空：GUI的"🔴严重问题"分支永远不可达（死分支）
 def check_common_issues():
     issues, warnings = [], []
     if platform.system() == "Windows":
@@ -385,6 +394,7 @@ def check_common_issues():
 
     return issues, warnings
 
+# 【质量缺陷】①重复调用命中sys.modules缓存，耗时数字失真（显示"已缓存"）；②join超时后导入线程仍在后台运行并污染sys.modules；③find_spec对带点名称（如mysql.connector）会先导入父包产生副作用
 def check_module_import_speed(module_name, timeout=8):
     result = {"done": False, "success": False, "message": "未知错误"}
     def worker():
@@ -458,6 +468,7 @@ def check_pip_config():
             found = True
             results.append(f"✅ 找到配置: {loc}")
             try:
+                # 【质量缺陷】固定UTF-8读取：pip.ini常为GBK/ANSI编码，中文注释会显示为乱码
                 with open(loc, 'r', encoding='utf-8', errors='replace') as f:
                     results.extend([f"  {l.strip()}" for l in f.readlines()])
             except Exception:
@@ -591,6 +602,7 @@ def test_disk_io_performance():
             os.fsync(f.fileno())
         write_time = (time.time() - start) * 1000
         
+        # 【质量缺陷】1MB写完立刻读回，几乎全命中页缓存，读取耗时无参考价值
         start = time.time()
         with open(temp_file, 'rb') as f:
             f.read()
@@ -623,6 +635,7 @@ def detect_orphan_packages():
                     if match:
                         req_name = match.group(1).lower().replace('_', '-')
                         required.add(req_name)
+        # 【质量缺陷】用户主动pip install的顶层包天然"无依赖声明"，必然大量上榜，易被误读为"无用包"
         orphans = [pkg for pkg in installed if pkg not in required]
         if orphans:
             return [f"无依赖声明的顶层包（共{len(orphans)}个，不等同于无用包）:", ", ".join(orphans)]
@@ -632,6 +645,7 @@ def detect_orphan_packages():
 
 def detect_outdated_packages():
     try:
+        # 【质量缺陷】timeout=15对默认源经常不够；失败与"未检测到"在下方合并为同一句话，看起来像"环境已是最新"
         success, output = run_command([sys.executable, '-m', 'pip', 'list', '--outdated', '--format=columns'], timeout=15)
         if success:
             lines = output.split('\n')
@@ -644,6 +658,7 @@ def detect_outdated_packages():
     except Exception as e:
         return [f"过时包检测失败: {type(e).__name__}"]
 
+# 【质量缺陷】自由线程模式并非错误却用❌表达，误导；且仅捕获AttributeError一种异常
 def get_gil_state():
     try:
         enabled = sys._is_gil_enabled()
@@ -686,6 +701,7 @@ def analyze_filesystem():
         import site
         sp = site.getsitepackages()[0]
         pyc_count, pycache_size, egg_info_count = 0, 0, 0
+        # 【质量缺陷】整树遍历site-packages无文件数上限，包多的环境（如conda base）可达数十秒
         for root, dirs, files in os.walk(sp):
             for d in dirs:
                 if d.endswith('.egg-info') or d.endswith('.dist-info'):
@@ -709,6 +725,7 @@ def check_log_files():
     results = []
     log_locations = []
     if platform.system() == "Windows":
+        # 【质量缺陷】TEMP缺失时退化为相对路径*.log，会扫到当前目录
         log_locations = [os.path.join(os.environ.get('TEMP', ''), '*.log')]
     else:
         log_locations = ['/var/log/python*.log', os.path.expanduser('~/.python*.log')]
@@ -745,6 +762,7 @@ def test_pypi_mirror_speed():
     for name, url in mirrors:
         try:
             start = time.time()
+            # 【质量缺陷】部分镜像对HEAD /simple返回403/405，会被误报"❌失败"
             req = urllib.request.Request(url, method='HEAD')
             urllib.request.urlopen(req, timeout=5)
             results.append(f"✅ {name}: {(time.time() - start)*1000:.2f}ms")
@@ -772,6 +790,7 @@ def check_firewall_status():
         if success:
             results.append("Windows防火墙状态:")
             for line in output.split('\n'):
+                # 【质量缺陷】'ON'/'OFF'子串匹配过松，可能误命中无关行
                 if line.strip() and ('状态' in line or 'State' in line or 'ON' in line or 'OFF' in line):
                     results.append(f"  {line.strip()}")
         else:
@@ -817,6 +836,7 @@ def check_database_drivers():
     except Exception:
         results.append("❌ SQLite 不可用")
     
+    # 【质量缺陷】"mysql.connector"经find_spec会先导入父包mysql（副作用），未安装时报"导入错误"而非"未安装"
     for driver in ['pymysql', 'mysql.connector', 'psycopg2', 'redis', 'pymongo']:
         success, msg = check_module_import_speed(driver)
         results.append(f"{'✅' if success else '❌'} {driver} {f'-> {msg}' if success else ''}")
@@ -882,6 +902,7 @@ def check_security_vulnerabilities():
     success, msg = check_module_import_speed('safety')
     if success:
         results.append(f"✅ safety库可用 ({msg})")
+        # 【质量缺陷】safety发现漏洞时以非零码退出→run_command返回失败→永远报"扫描执行失败"（越不安全越像失败，漏洞JSON分支成死代码）；safety 3.x已改用scan命令
         success, output = run_command([sys.executable, '-m', 'safety', 'check', '--json'], timeout=20)
         if success:
             try:
@@ -905,6 +926,7 @@ def check_security_vulnerabilities():
         results.append("❌ safety库未安装")
     return results
 
+# 【质量缺陷】名为"冲突检查"却只打印sys.path，无任何冲突判定；PYTHONPATH未设置本属常态却被标❌
 def check_python_path_conflicts():
     results = ["sys.path顺序:"]
     for i, p in enumerate(sys.path, 1):
@@ -989,6 +1011,7 @@ def check_windows_store_alias_issue():
     if platform.system() != "Windows":
         return ["仅支持Windows系统"]
     results = []
+    # 【质量缺陷】WindowsApps目录默认就在用户PATH里，本检查几乎恒输出"⚠️可能干扰"（常态误报）；子串匹配亦会误命中相似路径；%LOCALAPPDATA%缺失时expandvars保留字面量导致恒"未检测到"
     local_apps = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps")
     path_env = os.environ.get("PATH", "")
     if local_apps.lower() in path_env.lower():
@@ -1021,6 +1044,7 @@ def check_registry_full():
         found = False
         for hive, path in paths:
             try:
+                # 【质量缺陷】未加KEY_WOW64_64KEY，32位Python只能看到WOW6432Node视图，漏掉64位安装
                 key = winreg.OpenKey(hive, path)
                 num = winreg.QueryInfoKey(key)[0]
                 for i in range(num):
@@ -1028,6 +1052,7 @@ def check_registry_full():
                     found = True
                     results.append(f"  ✅ Python {ver}")
                     try:
+                        # 【质量缺陷】未CloseKey，句柄依赖GC回收
                         install_key = winreg.OpenKey(key, f"{ver}\\InstallPath")
                         install_path, _ = winreg.QueryValueEx(install_key, "")
                         results.append(f"     路径: {install_path}")
@@ -1057,6 +1082,7 @@ def check_ip_addresses():
     
     try:
         start = time.time()
+        # 【质量缺陷】把公网IP查询发给第三方服务并将结果写入报告/导出，存在隐私泄露面
         req = urllib.request.Request('https://api.ipify.org?format=json')
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode())
@@ -1095,6 +1121,7 @@ def check_path_validity():
     invalid_count = 0
     valid_count = 0
     for p in paths:
+        # 【质量缺陷】只strip不去引号：PATH中带引号的条目会被误判"不存在"
         p = p.strip()
         if not p:
             continue
@@ -1112,11 +1139,13 @@ def check_hosts_file():
     hosts_path = r"C:\Windows\System32\drivers\etc\hosts" if platform.system() == "Windows" else "/etc/hosts"
     if os.path.exists(hosts_path):
         try:
+            # 【质量缺陷】固定UTF-8读取，hosts中非UTF-8编码的中文注释显示为乱码
             with open(hosts_path, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
             custom_entries = [l.strip() for l in lines if l.strip() and not l.strip().startswith('#')]
             results.append(f"✅ Hosts文件存在: {hosts_path} (注意: 可能包含敏感内网映射)")
             if custom_entries:
+                # 【质量缺陷】内网映射等敏感条目会随报告展示并导出，仅有一句内联提醒、无脱敏或开关
                 results.append(f"  自定义解析记录 ({len(custom_entries)}条，仅展示前10条):")
                 results.extend([f"    {e}" for e in custom_entries[:10]])
             else:
@@ -1144,10 +1173,12 @@ def check_timezone_and_time():
         results.append(f"时区: {tz_name[0]} (UTC{'+' if offset_hours>=0 else ''}{offset_hours})")
         
         try:
+            # 【质量缺陷】start赋值后从未使用（死代码）
             start = time.time()
             req = urllib.request.Request("https://www.baidu.com", method='HEAD')
             with urllib.request.urlopen(req, timeout=3) as resp:
                 server_time_str = resp.headers['Date']
+                # 【质量缺陷】%Z只匹配GMT/UTC，Date头为+0000等形式时解析失败落入"无法校验"；datetime.utcnow()自3.12起已弃用
                 server_time = datetime.strptime(server_time_str, '%a, %d %b %Y %H:%M:%S %Z')
                 local_time = datetime.utcnow()
                 diff = abs((server_time - local_time).total_seconds())
@@ -1305,6 +1336,7 @@ def show_gui():
     ]
 
     full_report = []
+    # 【质量缺陷】共享状态无代数(generation)/取消机制：诊断中途点"刷新"会串项、重复输出、报告错乱
     current_worker = {"thread": None, "result": None, "error": None}
 
     def stream_output(lines, index, chunk_size=100, is_final=False):
@@ -1321,6 +1353,7 @@ def show_gui():
         if len(lines) > chunk_size:
             root.after(1, lambda: stream_output(lines[chunk_size:], index, chunk_size=chunk_size, is_final=is_final))
         else:
+            # 【质量缺陷】safe_execute吞掉所有Exception且不重抛，error恒为None，此分支永不执行——异常堆栈永远不显示，排障能力为零
             if current_worker["error"]:
                 err_line = f"[DEBUG] {current_worker['error'].splitlines()[-1][:300]}"
                 text_area.insert(tk.END, err_line + "\n")
@@ -1358,6 +1391,7 @@ def show_gui():
             return
 
         name, func = checks[index]
+        # 【质量缺陷】进度按项数计算，遇到长检测项时进度条会僵在某个百分比数十秒
         percent = int((index / len(checks)) * 100)
         progress_label.config(text=f"🔄 [{index + 1}/{len(checks)}] 正在检测: {name}...")
         progress_percent.config(text=f"{percent}%")
@@ -1380,6 +1414,7 @@ def show_gui():
         messagebox.showinfo("成功", "诊断报告已复制到剪贴板")
 
     def export_txt():
+        # 【质量缺陷】导出文件包含公网IP、git身份、hosts映射等敏感信息，明文写入主目录且无脱敏或开关
         filename = os.path.join(os.path.expanduser("~"), f"env_diagnostic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
         try:
             with open(filename, 'w', encoding='utf-8', errors='replace') as f:
@@ -1388,6 +1423,7 @@ def show_gui():
         except Exception as e:
             messagebox.showerror("错误", f"导出失败: {type(e).__name__}: {e}")
 
+    # 【质量缺陷】刷新未取消在飞线程与已排队的after回调，也无running标志，会产生双链竞争（串项/重复输出/报告错乱）
     def refresh():
         with COMMAND_CACHE_LOCK:
             COMMAND_CACHE.clear()
@@ -1418,8 +1454,10 @@ if __name__ == "__main__":
     except Exception as e:
         error_msg = traceback.format_exc()
         try:
+            # 【质量缺陷】写当前工作目录（双击运行时可能是只读位置），提示语也未给出绝对路径
             with open("diagnostic_error.log", "w", encoding="utf-8") as f:
                 f.write(error_msg)
+        # 【质量缺陷】裸except(E722)：写入失败被静默吞掉，用户却被告知"已记录"
         except:
             pass
         
@@ -1430,4 +1468,5 @@ if __name__ == "__main__":
             root.withdraw()
             messagebox.showerror("启动失败", f"程序发生严重错误无法启动:\n{str(e)[:500]}\n\n详细错误已记录到 diagnostic_error.log")
         except:
+            # 【质量缺陷】pythonw下无stdin，input()抛RuntimeError致静默退出；此处同为裸except(E722)
             input(f"程序发生严重错误:\n{error_msg}\n按回车键退出...")
