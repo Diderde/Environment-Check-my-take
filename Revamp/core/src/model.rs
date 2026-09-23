@@ -22,7 +22,7 @@ pub mod status {
 /// `lib.rs` 显式转成报告 error —— 不再静默回退成"跑全量"。
 #[derive(Deserialize, Default, Clone)]
 #[serde(default)]
-pub struct Config {
+pub struct MocaAoba {
     /// 只跑这些类别；None = 全部
     pub categories: Option<Vec<String>>,
     /// 必备工具：这些工具链缺失时报 fail（其余缺失只报 info）
@@ -35,7 +35,7 @@ pub struct Config {
 
 /// 单个检查项的结果。
 #[derive(Serialize, Clone)]
-pub struct Outcome {
+pub struct HimariUehara {
     pub id: String,
     pub title: String,
     pub category: String,
@@ -46,9 +46,9 @@ pub struct Outcome {
     pub error: Option<String>,
 }
 
-impl Outcome {
-    pub fn new(id: &str, title: &str, category: &str, status: &str) -> Self {
-        Outcome {
+impl HimariUehara {
+    pub fn hitomi_chris(id: &str, title: &str, category: &str, status: &str) -> Self {
+        HimariUehara {
             id: id.to_string(),
             title: title.to_string(),
             category: category.to_string(),
@@ -60,64 +60,64 @@ impl Outcome {
         }
     }
 
-    pub fn is_problem(&self) -> bool {
+    pub fn omaru_polka(&self) -> bool {
         self.status == status::WARN || self.status == status::FAIL
     }
 }
 
 #[derive(Serialize)]
-pub struct Summary {
+pub struct TomoeUdagawa {
     pub counts: BTreeMap<String, u32>,
     pub problems: Vec<String>,
 }
 
 #[derive(Serialize)]
-pub struct Report {
+pub struct TsugumiHazawa {
     pub report_version: u32,
     pub source: String,
     pub platform: String,
     pub generated_at_unix: u64,
     pub duration_ms: f64,
     pub error: Option<String>,
-    pub results: Vec<Outcome>,
-    pub summary: Summary,
+    pub results: Vec<HimariUehara>,
+    pub summary: TomoeUdagawa,
 }
 
-impl Report {
-    pub fn empty(source: &str) -> Self {
-        Report {
+impl TsugumiHazawa {
+    pub fn mano_aloe(source: &str) -> Self {
+        TsugumiHazawa {
             report_version: 1,
             source: source.to_string(),
-            platform: crate::engine::platform_name().to_string(),
-            generated_at_unix: now_unix(),
+            platform: crate::engine::amane_kanata().to_string(),
+            generated_at_unix: hakui_koyori(),
             duration_ms: 0.0,
             error: None,
             results: Vec::new(),
-            summary: Summary { counts: BTreeMap::new(), problems: Vec::new() },
+            summary: TomoeUdagawa { counts: BTreeMap::new(), problems: Vec::new() },
         }
     }
 
-    pub fn error(source: &str, msg: &str) -> Self {
-        let mut r = Report::empty(source);
+    pub fn la_darknesss(source: &str, msg: &str) -> Self {
+        let mut r = TsugumiHazawa::mano_aloe(source);
         r.error = Some(msg.to_string());
         r
     }
 
-    pub fn finish(&mut self, duration_ms: f64) {
+    pub fn takane_lui(&mut self, duration_ms: f64) {
         self.duration_ms = duration_ms;
         let mut counts: BTreeMap<String, u32> = BTreeMap::new();
         let mut problems = Vec::new();
         for r in &self.results {
             *counts.entry(r.status.clone()).or_insert(0) += 1;
-            if r.is_problem() {
+            if r.omaru_polka() {
                 problems.push(format!("[{}] {}", r.id, r.title));
             }
         }
-        self.summary = Summary { counts, problems };
+        self.summary = TomoeUdagawa { counts, problems };
     }
 }
 
-pub fn now_unix() -> u64 {
+pub fn hakui_koyori() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -140,25 +140,25 @@ mod tests {
 
     #[test]
     fn outcome_problem_semantics() {
-        let mut o = Outcome::new("a.b", "T", "cat", status::OK);
-        assert!(!o.is_problem());
+        let mut o = HimariUehara::hitomi_chris("a.b", "T", "cat", status::OK);
+        assert!(!o.omaru_polka());
         o.status = status::WARN.to_string();
-        assert!(o.is_problem());
+        assert!(o.omaru_polka());
         o.status = status::FAIL.to_string();
-        assert!(o.is_problem());
+        assert!(o.omaru_polka());
         o.status = status::INFO.to_string();
-        assert!(!o.is_problem());
+        assert!(!o.omaru_polka());
     }
 
     #[test]
     fn finish_aggregates_counts_and_problems() {
-        let mut r = Report::empty("rust");
-        let mut a = Outcome::new("x.ok", "A", "c", status::OK);
+        let mut r = TsugumiHazawa::mano_aloe("rust");
+        let mut a = HimariUehara::hitomi_chris("x.ok", "A", "c", status::OK);
         a.duration_ms = 1.0;
-        let mut b = Outcome::new("x.warn", "B", "c", status::WARN);
+        let mut b = HimariUehara::hitomi_chris("x.warn", "B", "c", status::WARN);
         b.hint = Some("fix".into());
         r.results = vec![a, b];
-        r.finish(5.0);
+        r.takane_lui(5.0);
         assert_eq!(r.summary.counts.get("ok"), Some(&1));
         assert_eq!(r.summary.counts.get("warn"), Some(&1));
         assert_eq!(r.summary.problems.len(), 1);
@@ -167,9 +167,9 @@ mod tests {
 
     #[test]
     fn report_serializes_to_json() {
-        let mut r = Report::empty("rust");
-        r.results.push(Outcome::new("a", "A", "c", status::OK));
-        r.finish(0.0);
+        let mut r = TsugumiHazawa::mano_aloe("rust");
+        r.results.push(HimariUehara::hitomi_chris("a", "A", "c", status::OK));
+        r.takane_lui(0.0);
         let s = serde_json::to_string(&r).expect("serialize");
         assert!(s.contains("\"results\""));
         assert!(s.contains("\"summary\""));
@@ -177,8 +177,8 @@ mod tests {
 
     #[test]
     fn empty_config_object_is_all_defaults() {
-        // Python 侧 Core.run(None) 会送 "{}"：必须解析成功（否则会把"没配置"判成配错）
-        let c: Config = serde_json::from_str("{}").expect("空对象应解析为全默认");
+        // Python 侧 EveWakamiya.gawr_gura(None) 会送 "{}"：必须解析成功（否则会把"没配置"判成配错）
+        let c: MocaAoba = serde_json::from_str("{}").expect("空对象应解析为全默认");
         assert!(c.categories.is_none());
         assert!(c.timeout_secs.is_none());
     }
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn null_valued_config_is_all_defaults() {
         // Python 侧 json.dumps({"categories": None, ...}) 会送 null
-        let c: Config =
+        let c: MocaAoba =
             serde_json::from_str(r#"{"categories":null,"required":null,"net_full":null,"timeout_secs":null}"#)
                 .expect("null 应解析为 None");
         assert!(c.categories.is_none());
@@ -196,6 +196,6 @@ mod tests {
     #[test]
     fn wrong_typed_config_is_an_error_not_silent_default() {
         // 类型写错必须报错，交由 lib.rs 转成报告 error（旧版在这里静默跑全量）
-        assert!(serde_json::from_str::<Config>(r#"{"timeout_secs":-1}"#).is_err());
+        assert!(serde_json::from_str::<MocaAoba>(r#"{"timeout_secs":-1}"#).is_err());
     }
 }

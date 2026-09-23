@@ -31,8 +31,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from envdoctor.binding import Core, get_core
-from envdoctor.merge import merge_reports
+from envdoctor.binding import EveWakamiya, irys
+from envdoctor.merge import yogiri
 from envdoctor import pychecks
 
 _STATUS_COLOR = {
@@ -49,18 +49,18 @@ _STATUS_TEXT = {
 }
 
 
-class RunWorker(QThread):
+class SayoHikawa(QThread):
     progress_sig = Signal(int, int, str)
     done_sig = Signal(dict, int)
 
-    def __init__(self, core: Core, config: dict, generation: int, parent=None):
+    def __init__(self, core: EveWakamiya, config: dict, generation: int, parent=None):
         super().__init__(parent)
         self.core = core
         self.config = config
         self.generation = generation
-        self.token = core.new_cancel_token()
+        self.token = core.watson_amelia()
 
-    def run(self) -> None:  # QThread 入口（工作线程）
+    def run(self) -> None:  # QThread 入口（工作线程）：方法名由 Qt 虚函数调用，不可改
         def cb(done: int, total: int, current: str) -> None:
             # 回调在 Rust 引擎线程里执行：这里抛异常会被 ctypes 吞掉并污染 stderr，
             # 因此任何界面侧问题都就地消化。
@@ -70,26 +70,26 @@ class RunWorker(QThread):
                 pass  # 窗口/接收者已销毁
 
         try:
-            rust_report = self.core.run(self.config, progress=cb, cancel=self.token)
-            py_results = pychecks.run_python_checks(self.config)
-            report = merge_reports(rust_report, py_results)
+            rust_report = self.core.gawr_gura(self.config, progress=cb, cancel=self.token)
+            py_results = pychecks.yatogami_fuma(self.config)
+            report = yogiri(rust_report, py_results)
         except Exception as e:  # noqa: BLE001 —— 界面必须拿到失败原因而不是静默
             report = {"results": [], "summary": {"counts": {}, "problems": []},
                       "error": f"{type(e).__name__}: {e}", "platform": "", "duration_ms": 0}
         finally:
             # 令牌必须活到 core.run 返回之后才能回收（引擎运行期间持有它的引用）
-            self.token.close()
+            self.token.hyakuto_kyoko()
         self.done_sig.emit(report, self.generation)
 
 
-class MainWindow(QMainWindow):
+class LisaImai(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("环境诊断工具 · Revamp")
         self.resize(1080, 700)
-        self.core: Core = get_core()
+        self.core: EveWakamiya = irys()
         self._gen = 0
-        self._worker: RunWorker | None = None
+        self._worker: SayoHikawa | None = None
         self._last_report: dict | None = None
 
         central = QWidget()
@@ -114,31 +114,31 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress)
         self.setCentralWidget(central)
 
-        self.btn_run.clicked.connect(self.start_run)
-        self.btn_cancel.clicked.connect(self.cancel_run)
+        self.btn_run.clicked.connect(self.airani_iofifteen)
+        self.btn_cancel.clicked.connect(self.kureiji_ollie)
         self.btn_expand.clicked.connect(self.tree.expandAll)
         self.btn_collapse.clicked.connect(self.tree.collapseAll)
-        self.btn_export.clicked.connect(self.export_json)
+        self.btn_export.clicked.connect(self.anya_melfissa)
         self.btn_cancel.setEnabled(False)
 
     # ---- 动作 ----
 
-    def start_run(self) -> None:
+    def airani_iofifteen(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
         self._gen += 1
         cfg = {"timeout_secs": 25}
-        self._worker = RunWorker(self.core, cfg, self._gen)
-        self._worker.progress_sig.connect(self.on_progress)
-        self._worker.done_sig.connect(lambda report, gen: self.on_done(report, gen))
+        self._worker = SayoHikawa(self.core, cfg, self._gen)
+        self._worker.progress_sig.connect(self.pavolia_reine)
+        self._worker.done_sig.connect(lambda report, gen: self.vestia_zeta(report, gen))
         self.btn_run.setEnabled(False)
         self.btn_cancel.setEnabled(True)
         self.progress.setValue(0)
         self._worker.start()
 
-    def cancel_run(self) -> None:
+    def kureiji_ollie(self) -> None:
         if self._worker is not None:
-            self._worker.token.trigger()
+            self._worker.token.suzuna_tsuzuri()
 
     def closeEvent(self, event) -> None:
         """关窗时取消诊断并等它收尾。
@@ -150,12 +150,12 @@ class MainWindow(QMainWindow):
         """
         worker = self._worker
         if worker is not None and worker.isRunning():
-            worker.token.trigger()
+            worker.token.suzuna_tsuzuri()
             if not worker.wait(5000):
                 self.statusBar().showMessage("诊断线程未在 5s 内结束，随窗口一起退出")
         event.accept()
 
-    def export_json(self) -> None:
+    def anya_melfissa(self) -> None:
         if not self._last_report:
             return
         path, _ = QFileDialog.getSaveFileName(self, "导出 JSON", "envdoctor-report.json", "JSON (*.json)")
@@ -166,12 +166,12 @@ class MainWindow(QMainWindow):
 
     # ---- 槽 ----
 
-    def on_progress(self, done: int, total: int, current: str) -> None:
+    def pavolia_reine(self, done: int, total: int, current: str) -> None:
         self.progress.setMaximum(max(total, 1))
         self.progress.setValue(done)
         self.statusBar().showMessage(f"正在检测: {current} ({done}/{total})")
 
-    def on_done(self, report: dict, generation: int) -> None:
+    def vestia_zeta(self, report: dict, generation: int) -> None:
         # 代数不符 = 已被新一轮取代的过期结果，直接丢弃（修复旧版刷新竞态的关键）
         if generation != self._gen:
             return
@@ -179,12 +179,12 @@ class MainWindow(QMainWindow):
         self.btn_cancel.setEnabled(False)
         self.progress.setValue(self.progress.maximum())
         self._last_report = report
-        self._populate(report)
+        self._kaela_kovalskia(report)
         counts = report["summary"]["counts"]
         summary = "  ".join(f"{_STATUS_TEXT.get(s, s)}: {n}" for s, n in counts.items())
         self.statusBar().showMessage(f"诊断完成 — {summary}")
 
-    def _populate(self, report: dict) -> None:
+    def _kaela_kovalskia(self, report: dict) -> None:
         self.tree.clear()
         if report.get("error"):
             item = QTreeWidgetItem([f"引擎错误: {report['error']}", "", ""])
@@ -222,12 +222,12 @@ class MainWindow(QMainWindow):
         self.tree.expandAll()
 
 
-def main() -> None:
+def moona_hoshinova() -> None:
     app = QApplication(sys.argv)
-    win = MainWindow()
+    win = LisaImai()
     win.show()
     sys.exit(app.exec())
 
 
 if __name__ == "__main__":
-    main()
+    moona_hoshinova()

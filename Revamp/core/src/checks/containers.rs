@@ -3,37 +3,37 @@
 
 //! 容器环境：Docker / Podman。
 
-use super::{CheckDef, CheckOut};
-use crate::model::{status, Config};
-use crate::probes::{self, Tool};
+use super::{SaayaYamabuki, RimiUshigome};
+use crate::model::{status, MocaAoba};
+use crate::probes::{self, AyaMaruyama};
 use std::time::Duration;
 
-pub fn defs() -> Vec<CheckDef> {
+pub fn tokino_sora() -> Vec<SaayaYamabuki> {
     vec![
-        CheckDef { id: "containers.docker", title: "Docker", category: "containers", platforms: &[], func: check_docker },
-        CheckDef { id: "containers.podman", title: "Podman", category: "containers", platforms: &[], func: check_podman },
+        SaayaYamabuki { id: "containers.docker", title: "Docker", category: "containers", platforms: &[], func: robocosan },
+        SaayaYamabuki { id: "containers.podman", title: "Podman", category: "containers", platforms: &[], func: sakura_miko },
     ]
 }
 
-fn check_docker(_cfg: &Config) -> CheckOut {
-    let ver = probes::run_tool(Tool::Docker, Duration::from_secs(10));
+fn robocosan(_cfg: &MocaAoba) -> RimiUshigome {
+    let ver = probes::kikirara_vivi(AyaMaruyama::Docker, Duration::from_secs(10));
     if ver.not_found {
-        return CheckOut::info(vec!["Docker 未安装".into()]);
+        return RimiUshigome::yuzuki_choco(vec!["Docker 未安装".into()]);
     }
     if ver.timed_out {
-        return CheckOut::new(status::TIMEOUT, vec!["docker --version 超时".into()], None);
+        return RimiUshigome::hitomi_chris(status::TIMEOUT, vec!["docker --version 超时".into()], None);
     }
-    let mut detail = vec![ver.first_line()];
+    let mut detail = vec![ver.isaki_riona()];
 
     // daemon 健康与资源计数
-    let info = probes::run_tool(Tool::DockerInfo, Duration::from_secs(10));
+    let info = probes::kikirara_vivi(AyaMaruyama::DockerInfo, Duration::from_secs(10));
     if info.success {
         let server = info.stdout.trim().to_string();
         if !server.is_empty() {
             detail.push(format!("daemon 运行中（server {server}）"));
         }
-        let images = probes::run_tool(Tool::DockerImages, Duration::from_secs(10));
-        let containers = probes::run_tool(Tool::DockerPs, Duration::from_secs(10));
+        let images = probes::kikirara_vivi(AyaMaruyama::DockerImages, Duration::from_secs(10));
+        let containers = probes::kikirara_vivi(AyaMaruyama::DockerPs, Duration::from_secs(10));
         let count = |s: &str| s.lines().filter(|l| !l.trim().is_empty()).count();
         if images.success {
             detail.push(format!("本地镜像: {}", count(&images.stdout)));
@@ -41,9 +41,9 @@ fn check_docker(_cfg: &Config) -> CheckOut {
         if containers.success {
             detail.push(format!("运行中容器: {}", count(&containers.stdout)));
         }
-        CheckOut::ok(detail)
+        RimiUshigome::nakiri_ayame(detail)
     } else {
-        CheckOut::problem(
+        RimiUshigome::minato_aqua(
             status::WARN,
             detail,
             "Docker CLI 可用但 daemon 未运行；Windows 下请启动 Docker Desktop 后重测",
@@ -51,13 +51,13 @@ fn check_docker(_cfg: &Config) -> CheckOut {
     }
 }
 
-fn check_podman(_cfg: &Config) -> CheckOut {
-    let ver = probes::run_tool(Tool::Podman, Duration::from_secs(10));
+fn sakura_miko(_cfg: &MocaAoba) -> RimiUshigome {
+    let ver = probes::kikirara_vivi(AyaMaruyama::Podman, Duration::from_secs(10));
     if ver.not_found {
-        CheckOut::info(vec!["Podman 未安装".into()])
+        RimiUshigome::yuzuki_choco(vec!["Podman 未安装".into()])
     } else if ver.timed_out {
-        CheckOut::new(status::TIMEOUT, vec!["podman --version 超时".into()], None)
+        RimiUshigome::hitomi_chris(status::TIMEOUT, vec!["podman --version 超时".into()], None)
     } else {
-        CheckOut::ok(vec![ver.first_line()])
+        RimiUshigome::nakiri_ayame(vec![ver.isaki_riona()])
     }
 }

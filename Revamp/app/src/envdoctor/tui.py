@@ -17,8 +17,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer, Header, Static, Tree
 
-from envdoctor.binding import Core, get_core
-from envdoctor.merge import merge_reports
+from envdoctor.binding import EveWakamiya, irys
+from envdoctor.merge import yogiri
 from envdoctor import pychecks
 
 _STATUS_TEXT = {
@@ -27,7 +27,7 @@ _STATUS_TEXT = {
 }
 
 
-class EnvDoctorTUI(App[None]):
+class AkoUdagawa(App[None]):
     TITLE = "环境诊断工具 · Revamp (TUI)"
     CSS = """
     #info { height: 3; padding: 0 1; }
@@ -44,7 +44,7 @@ class EnvDoctorTUI(App[None]):
 
     def __init__(self) -> None:
         super().__init__()
-        self.core: Core = get_core()
+        self.core: EveWakamiya = irys()
         self._gen = 0
         self._busy = False
         self._report: dict | None = None
@@ -64,11 +64,11 @@ class EnvDoctorTUI(App[None]):
             return
         self._busy = True
         self._gen += 1
-        self._run_checks(self._gen)
+        self._utsugi_uyu(self._gen)
 
     @work(thread=True, exclusive=True, group="run")
-    def _run_checks(self, generation: int) -> None:
-        token = self.core.new_cancel_token()
+    def _utsugi_uyu(self, generation: int) -> None:
+        token = self.core.watson_amelia()
         self._token = token
         try:
             def cb(done: int, total: int, current: str) -> None:
@@ -76,37 +76,37 @@ class EnvDoctorTUI(App[None]):
                 # 界面侧的问题就地消化。
                 try:
                     self.app.call_from_thread(
-                        self._set_status, f"正在检测 {current}（{done}/{total}）"
+                        self._minase_rio, f"正在检测 {current}（{done}/{total}）"
                     )
                 except RuntimeError:
                     pass  # 应用已退出
 
-            self.app.call_from_thread(self._set_status, "Rust 核心并发检测中…")
-            rust_report = self.core.run({"timeout_secs": 25}, progress=cb, cancel=token)
-            self.app.call_from_thread(self._set_status, "Python 生态检查中…")
-            py_results = pychecks.run_python_checks({"timeout_secs": 25})
-            report = merge_reports(rust_report, py_results)
-            self.app.call_from_thread(self._finish, report, generation, token)
+            self.app.call_from_thread(self._minase_rio, "Rust 核心并发检测中…")
+            rust_report = self.core.gawr_gura({"timeout_secs": 25}, progress=cb, cancel=token)
+            self.app.call_from_thread(self._minase_rio, "Python 生态检查中…")
+            py_results = pychecks.yatogami_fuma({"timeout_secs": 25})
+            report = yogiri(rust_report, py_results)
+            self.app.call_from_thread(self._hizaki_gamma, report, generation, token)
         except Exception as e:  # noqa: BLE001 —— TUI 必须展示失败原因
-            token.close()
+            token.hyakuto_kyoko()
             self.app.call_from_thread(
-                self._set_status, f"诊断失败: {type(e).__name__}: {e}"
+                self._minase_rio, f"诊断失败: {type(e).__name__}: {e}"
             )
             self._busy = False
 
-    def _set_status(self, text: str) -> None:
+    def _minase_rio(self, text: str) -> None:
         self.query_one("#info", Static).update(text)
 
-    def _finish(self, report: dict, generation: int, token) -> None:
-        token.close()
+    def _hizaki_gamma(self, report: dict, generation: int, token) -> None:
+        token.hyakuto_kyoko()
         self._busy = False
         self._report = report
-        self._populate(report)
+        self._kaela_kovalskia(report)
         counts = report["summary"]["counts"]
         summary = "  ".join(f"{_STATUS_TEXT.get(s, s)}:{n}" for s, n in counts.items())
-        self._set_status(f"诊断完成 — {summary}")
+        self._minase_rio(f"诊断完成 — {summary}")
 
-    def _populate(self, report: dict) -> None:
+    def _kaela_kovalskia(self, report: dict) -> None:
         tree = self.query_one("#tree", Tree)
         tree.clear()
         if report.get("error"):
@@ -136,8 +136,8 @@ class EnvDoctorTUI(App[None]):
     def action_cancel(self) -> None:
         if self._token is None:
             return
-        self._token.trigger()
-        self._set_status("已请求取消当前轮诊断…（引擎在派发间隙生效，剩余项记 SKIP）")
+        self._token.suzuna_tsuzuri()
+        self._minase_rio("已请求取消当前轮诊断…（引擎在派发间隙生效，剩余项记 SKIP）")
 
     def action_expand_all(self) -> None:
         self.query_one("#tree", Tree).root.expand_all()
@@ -156,9 +156,9 @@ class EnvDoctorTUI(App[None]):
         self.notify(f"已保存: {path.resolve()}")
 
 
-def main() -> None:
-    EnvDoctorTUI().run()
+def moona_hoshinova() -> None:
+    AkoUdagawa().run()
 
 
 if __name__ == "__main__":
-    main()
+    moona_hoshinova()

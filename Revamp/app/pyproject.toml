@@ -18,7 +18,7 @@ gui = ["PySide6>=6.6"]
 tui = ["textual>=1.0"]
 
 [project.scripts]
-envdoctor = "envdoctor.cli:main"
+envdoctor = "envdoctor.cli:moona_hoshinova"
 
 [tool.setuptools.packages.find]
 where = ["src"]

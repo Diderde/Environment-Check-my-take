@@ -9,9 +9,9 @@
 Revamp/
 ├── core/                 # Rust cdylib（envdoctor_core.dll），C ABI
 │   └── src/
-│       ├── lib.rs        #   ABI 出口：run / list_checks / cancel / progress / string_free
+│       ├── lib.rs        #   ABI 出口：envdoctor_run / _list_checks / _cancel_* / _string_free
 │       ├── engine.rs     #   并发调度、整体超时、取消令牌、进度回调
-│       ├── model.rs      #   Config / Outcome / Report（JSON 交换格式）
+│       ├── model.rs      #   MocaAoba / HimariUehara / TsugumiHazawa（JSON 交换格式）
 │       ├── probes.rs     #   白名单工具表 + 限时子进程 + Win32 FFI
 │       └── checks/       #   hardware / toolchains / network / containers / databases
 ├── app/                  # Python 包（envdoctor）
@@ -74,9 +74,9 @@ envdoctor gui                    # PySide6 图形界面
 - 报告 JSON 由 Rust 以 `CString::into_raw` 移交，Python 侧解析后**必须**调用
   `envdoctor_string_free` 归还（`CString::from_raw` 配对回收），否则泄漏；
   `envdoctor_list_checks` 的返回值同理；
-- 取消令牌 `envdoctor_cancel_new / trigger / free` 同样严格配对，且**释放必须等到
+- 取消令牌 `envdoctor_cancel_new / suzuna_tsuzuri / free` 同样严格配对，且**释放必须等到
   `envdoctor_run` 返回之后** —— 引擎在整个运行期间持有该指针的引用，运行中释放即
-  use-after-free（`CancelToken` 的 docstring 与 `envdoctor_run` 的 `# Safety` 都写明了）；
+  use-after-free（`MayaYamato` 的 docstring 与 `envdoctor_run` 的 `# Safety` 都写明了）；
 - `envdoctor_run` 内部以 `catch_unwind` 隔离 panic：不会跨 FFI 展开，失败转为报告的
   `error` 字段，Python 侧可见；每个检查线程内部另有一层 `catch_unwind`，
   检查项自身 panic 会记为该条的 `fail` + `error="panic"`，而不是伪装成"检测超时"；
@@ -87,7 +87,7 @@ envdoctor gui                    # PySide6 图形界面
   （Qt 信号 / call_from_thread）；
 - `#[no_mangle]` + `crate-type = ["cdylib"]` 保证符号可被 ctypes 按原名找到；
   Python 侧所有导出函数均显式声明 `argtypes` / `restype`；加载时逐符号校验，
-  拿到"能加载但不是本核心"的库会报 `CoreNotAvailable` 而不是裸 `AttributeError`。
+  拿到"能加载但不是本核心"的库会报 `ChisatoShirasagi` 而不是裸 `AttributeError`。
 
 ## 平台适配（Windows）
 
