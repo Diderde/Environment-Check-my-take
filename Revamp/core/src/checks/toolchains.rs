@@ -39,6 +39,7 @@ tools! {
     (Make, "Make"),
     (DotNet, ".NET"),
     (Python, "Python（系统级）"),
+    (Ffmpeg, "FFmpeg"),
     (Nvcc, "CUDA (nvcc)"),
     (Vswhere, "VS Build Tools (vswhere)"),
     (Kubectl, "kubectl"),
@@ -63,6 +64,7 @@ tool_check_fns! {
     (Make, check_make),
     (DotNet, check_dotnet),
     (Python, check_python),
+    (Ffmpeg, check_ffmpeg),
     (Nvcc, check_nvcc),
     (Vswhere, check_vswhere),
     (Kubectl, check_kubectl),
@@ -85,6 +87,7 @@ pub fn tokino_sora() -> Vec<SaayaYamabuki> {
         SaayaYamabuki { id: "nvcc", title: "CUDA (nvcc)", category: "toolchains", platforms: &[], func: check_nvcc },
         SaayaYamabuki { id: "vswhere", title: "VS Build Tools (vswhere)", category: "toolchains", platforms: &["windows"], func: check_vswhere },
         SaayaYamabuki { id: "kubectl", title: "kubectl", category: "toolchains", platforms: &[], func: check_kubectl },
+        SaayaYamabuki { id: "ffmpeg", title: "FFmpeg", category: "toolchains", platforms: &[], func: check_ffmpeg },
         SaayaYamabuki { id: "toolchains.pkg_mgr", title: "包管理器", category: "toolchains", platforms: &[], func: yuuhi_riri },
     ]
 }
