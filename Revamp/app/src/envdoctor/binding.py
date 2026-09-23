@@ -27,7 +27,7 @@ def _dll_candidates() -> list[Path]:
     if env:
         out.append(Path(env))
     here = Path(__file__).resolve()
-    # app/src/envdoctor/binding.py → parents: [envdoctor, src, app, Remastered]
+    # app/src/envdoctor/binding.py → parents: [envdoctor, src, app, Revamp]
     if len(here.parents) > 3:
         out.append(
             here.parents[3] / "core" / "target" / "release" / "envdoctor_core.dll"

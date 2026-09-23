@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! C ABI 出口：由 Python 侧通过 ctypes 调用。
 //!
 //! 约定：

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! 数据库服务探测：本机常见数据库端口占用（占用=服务在跑，属正常信息而非问题）。
 
 use super::{CheckDef, CheckOut};

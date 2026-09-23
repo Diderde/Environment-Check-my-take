@@ -45,7 +45,7 @@ def _load_core(core_path: Path | None) -> Core:
         return Core(path=core_path) if core_path else get_core()
     except CoreNotAvailable as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
-        typer.echo("请先构建 Rust 核心：cargo build --release（在 Remastered/core 下）")
+        typer.echo("请先构建 Rust 核心：cargo build --release（在 Revamp/core 下）")
         raise typer.Exit(code=2) from e
 
 
@@ -147,7 +147,7 @@ def run(
     try:
         rust_report = core_obj.run(cfg, cancel=token)
         py_cfg = {"timeout_secs": timeout}
-        py_results = pychecks.run_python_checks(py_cfg)
+        py_results = pychecks.run_python_checks(py_cfg, categories=category or None)
     finally:
         token.close()
 

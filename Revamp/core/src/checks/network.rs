@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! 网络诊断：DNS / 连通性 / 代理 / 防火墙 / 时钟同步 / 端口占用 / 公网 IP（隐私门控）。
 
 use super::{CheckDef, CheckOut};
@@ -20,15 +23,25 @@ pub fn defs() -> Vec<CheckDef> {
 }
 
 fn tcp_connect(host: &str, port: u16, timeout: Duration) -> Result<f64, String> {
-    let mut resolved = (host, port)
+    let resolved: Vec<std::net::SocketAddr> = (host, port)
         .to_socket_addrs()
         .map_err(|e| format!("DNS 解析失败: {e}"))?
-        .collect::<Vec<_>>();
-    let target = resolved.pop().ok_or_else(|| "DNS 未返回地址".to_string())?;
+        .collect();
+    if resolved.is_empty() {
+        return Err("DNS 未返回地址".into());
+    }
     let t0 = Instant::now();
-    TcpStream::connect_timeout(&target, timeout)
-        .map(|_| t0.elapsed().as_secs_f64() * 1000.0)
-        .map_err(|e| format!("连接失败: {e}"))
+    let mut last_err = String::new();
+    for target in &resolved {
+        match TcpStream::connect_timeout(target, timeout) {
+            Ok(_) => return Ok(t0.elapsed().as_secs_f64() * 1000.0),
+            Err(e) => last_err = format!("{target}: {e}"),
+        }
+    }
+    Err(format!(
+        "连接失败（{} 个地址均尝试）: {last_err}",
+        resolved.len()
+    ))
 }
 
 fn check_dns(_cfg: &Config) -> CheckOut {

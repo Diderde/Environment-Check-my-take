@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! 容器环境：Docker / Podman。
 
 use super::{CheckDef, CheckOut};
