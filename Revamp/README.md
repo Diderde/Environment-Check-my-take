@@ -9,7 +9,7 @@
 Revamp/
 ├── core/                 # Rust cdylib（envdoctor_core.dll），C ABI
 │   └── src/
-│       ├── lib.rs        #   ABI 出口：run / cancel / progress / string_free
+│       ├── lib.rs        #   ABI 出口：run / list_checks / cancel / progress / string_free
 │       ├── engine.rs     #   并发调度、整体超时、取消令牌、进度回调
 │       ├── model.rs      #   Config / Outcome / Report（JSON 交换格式）
 │       ├── probes.rs     #   白名单工具表 + 限时子进程 + Win32 FFI
@@ -48,30 +48,54 @@ python -m venv .venv
 ## 使用
 
 ```bash
-envdoctor                        # 全量诊断，分类折叠显示
-envdoctor --list-checks          # 列出全部检查项
+envdoctor                        # 全量诊断，分类折叠显示（无参即跑，等同于 `run`）
+envdoctor --list-checks          # 列出全部检查项（Rust 核心 + Python 侧）
 envdoctor run -E                 # 展开全部明细
 envdoctor run -c python -c network -e network   # 选类别并展开
-envdoctor run --require git,node # 声明必备工具，缺失记 FAIL
+envdoctor run --require git,node # 声明必备工具，缺失记 FAIL（逗号或重复传参均可）
 envdoctor run --json report.json --txt report.md
 envdoctor run --net-full         # 启用公网 IP 检查（默认关闭，见隐私）
 envdoctor tui                    # Textual 终端界面（R 运行 / C 取消 / E 展开 / Q 退出）
 envdoctor gui                    # PySide6 图形界面
 ```
 
-退出码：存在 FAIL 级问题时为 1（可直接用于 CI/脚本）。
+退出码：存在 FAIL 级问题、或引擎异常（`report.error` 非空）时为 1；核心 DLL 缺失为 2。
+可直接用于 CI/脚本 —— 引擎自己挂掉不会伪装成"环境没问题"。
+
+`--timeout SECONDS`（默认 25，下限 1）是**整轮**超时预算 = 单项预算 × 检查项数；
+各检查项自身的子进程超时是各自固定的（如工具链 10s、NTP 15s）。
+
+控制台编码：报告输出会自动探测 `sys.stdout` 编码，中文 Windows（cp936）下把 emoji/箭头
+降级为 ASCII 图标（`[OK]`/`[!]`/`[X]`），因此 `envdoctor run > report.txt` 与 CI 管道不会
+因 `UnicodeEncodeError` 中断，`--json`/`--txt` 也照常落盘。
 
 ## FFI 约定（Rust ↔ Python）
 
 - 报告 JSON 由 Rust 以 `CString::into_raw` 移交，Python 侧解析后**必须**调用
   `envdoctor_string_free` 归还（`CString::from_raw` 配对回收），否则泄漏；
-- 取消令牌 `envdoctor_cancel_new / trigger / free` 同样严格配对；
+  `envdoctor_list_checks` 的返回值同理；
+- 取消令牌 `envdoctor_cancel_new / trigger / free` 同样严格配对，且**释放必须等到
+  `envdoctor_run` 返回之后** —— 引擎在整个运行期间持有该指针的引用，运行中释放即
+  use-after-free（`CancelToken` 的 docstring 与 `envdoctor_run` 的 `# Safety` 都写明了）；
 - `envdoctor_run` 内部以 `catch_unwind` 隔离 panic：不会跨 FFI 展开，失败转为报告的
-  `error` 字段，Python 侧可见；
-- `CDLL` 调用期间 ctypes 自动释放 GIL（GUI 不卡顿）；进度回调由 ctypes 在引擎线程
-  进入 Python 前自动获取 GIL，界面层负责再切回自己的主线程（Qt 信号 / call_from_thread）；
+  `error` 字段，Python 侧可见；每个检查线程内部另有一层 `catch_unwind`，
+  检查项自身 panic 会记为该条的 `fail` + `error="panic"`，而不是伪装成"检测超时"；
+- 配置 JSON 解析失败会返回 `error="config: …"`，**不再静默回退成默认配置**（旧版会因此
+  把"只想跑 network"变成"跑全量"且毫无提示）；
+- `CDLL` 调用期间 ctypes 自动释放 GIL（GUI 不卡顿）；进度回调由 ctypes 在**调用
+  `envdoctor_run` 的那个线程**上进入 Python 并自动获取 GIL，界面层负责再切回自己的主线程
+  （Qt 信号 / call_from_thread）；
 - `#[no_mangle]` + `crate-type = ["cdylib"]` 保证符号可被 ctypes 按原名找到；
-  Python 侧所有导出函数均显式声明 `argtypes` / `restype`。
+  Python 侧所有导出函数均显式声明 `argtypes` / `restype`；加载时逐符号校验，
+  拿到"能加载但不是本核心"的库会报 `CoreNotAvailable` 而不是裸 `AttributeError`。
+
+## 平台适配（Windows）
+
+- 工具名按 **PATHEXT** 解析：`npm` 实际是 `npm.cmd`，而 Rust 的 `Command` 只找
+  `npm` / `npm.exe`，不处理垫片 —— 旧版会把已安装的 npm 报成"未安装"；
+- 子进程超时用 `taskkill /T` 收掉**整棵进程树**，并给 stdout/stderr 排空加上界：
+  否则孙进程继承着管道写端，检查线程会永久挂死；
+- 所有子进程附加 `CREATE_NO_WINDOW`，GUI 调用不弹控制台窗口。
 
 ## 测试
 
@@ -83,7 +107,10 @@ cargo test --release      # Rust 核心（模型/引擎/注册表/探测）
 ## 隐私
 
 - 默认不发起任何包含设备信息的外发请求；公网 IP 查询需显式 `--net-full`；
-- 报告中不包含用户名、序列化凭据（代理地址凭据自动 `***` 打码）；
+- 报告中不包含用户名、序列化凭据：代理地址、`PIP_INDEX_URL` 等含 `user:pass@` 的值
+  一律按同一规则（`scheme://***@host`，按最后一个 `@` 切分）打码，Rust 与 Python 两侧
+  共用该规则，且两侧都有单元测试守着；
+- 报告中的"相关环境变量"只回显上面这类脱敏后的值；
 - 导出文件内容由使用者全权控制（`--json` / `--txt` / GUI 导出按钮）。
 
 ## 许可

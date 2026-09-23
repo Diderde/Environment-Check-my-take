@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import locale
 import os
 import platform
 import re
@@ -21,6 +22,8 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+
+from envdoctor.merge import redact_url
 
 PYTHON_CATEGORY = "python"
 
@@ -33,6 +36,22 @@ _COLD_IMPORT_CODE = (
     "except Exception:\n"
     "    print(-1)\n"
 )
+
+
+def _decode(raw: bytes | None) -> str:
+    """子进程输出解码：先按 UTF-8 严格解，失败再退到系统区域编码。
+
+    子进程往管道写输出时通常按 locale 编码（中文 Windows 为 cp936），父进程直接按
+    UTF-8 解码会把中文用户名/中文安装路径变成替换字符。两级尝试比 errors="replace"
+    更保守：只有真解不出来才降级。
+    """
+    if not raw:
+        return ""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        fallback = locale.getpreferredencoding(False) or "utf-8"
+        return raw.decode(fallback, "replace")
 
 
 def _out(
@@ -56,7 +75,7 @@ def _pip(args: list[str], timeout: int) -> tuple[bool, str]:
         [sys.executable, "-m", "pip", *args],
         capture_output=True, timeout=timeout,
     )
-    text = (r.stdout or b"").decode("utf-8", "replace") or (r.stderr or b"").decode("utf-8", "replace")
+    text = _decode(r.stdout) or _decode(r.stderr)
     return r.returncode == 0, text.strip()
 
 
@@ -83,7 +102,7 @@ def check_multiplicity(cfg: dict) -> dict:
     found: list[str] = []
     if sys.platform == "win32":
         r = subprocess.run(["where.exe", "python"], capture_output=True, timeout=8)
-        found = [l.strip() for l in r.stdout.decode("utf-8", "replace").splitlines() if l.strip()]
+        found = [l.strip() for l in _decode(r.stdout).splitlines() if l.strip()]
         detail = [f"where python: {p}" for p in found]
         # WindowsApps 下的商店存根不是真解释器，不计入多版本数量
         ignored_stubs = 0
@@ -98,7 +117,7 @@ def check_multiplicity(cfg: dict) -> dict:
         py = shutil.which("py")
         if py:
             r2 = subprocess.run(["py", "-0p"], capture_output=True, timeout=8)
-            listing = r2.stdout.decode("utf-8", "replace").strip()
+            listing = _decode(r2.stdout).strip()
             if listing:
                 detail.append("py launcher:\n    " + listing.replace("\n", "\n    "))
     else:
@@ -212,10 +231,11 @@ def check_mirror(cfg: dict) -> dict:
         if m:
             index = m.group(1).strip("'\"")
     base = (index or "https://pypi.org/simple").rstrip("/")
-    detail = [f"当前 index-url: {index or '默认 (pypi.org)'}"]
+    detail = [f"当前 index-url: {redact_url(index) if index else '默认 (pypi.org)'}"]
     try:
         t0 = time.perf_counter()
-        urllib.request.urlopen(f"{base}/simple/", timeout=8)
+        with urllib.request.urlopen(f"{base}/simple/", timeout=8):
+            pass
         ms = (time.perf_counter() - t0) * 1000
         detail.append(f"GET {base}/simple/ 可达（{ms:.0}ms）")
         return _out("python.mirror", "包镜像源", "ok", detail)
@@ -236,8 +256,11 @@ def _import_check(lib: str):
             [sys.executable, "-c", _COLD_IMPORT_CODE, lib],
             capture_output=True, timeout=10,
         )
-        text = (r.stdout or b"").decode("utf-8", "replace").strip()
-        ms = float(text) if text and text != "-1" else -1.0
+        text = _decode(r.stdout).strip()
+        try:
+            ms = float(text)
+        except ValueError:
+            ms = -1.0
         if ms < 0:
             return _out(f"python.import.{lib}", f"导入 · {lib}", "warn", ["导入失败（全新子进程中）"],
                         hint="库安装可能损坏：pip install -U --force-reinstall " + lib)
@@ -277,7 +300,9 @@ def check_gil(_cfg: dict) -> dict:
 def check_env_vars(_cfg: dict) -> dict:
     keys = ["VIRTUAL_ENV", "CONDA_DEFAULT_ENV", "CONDA_PREFIX", "PIP_INDEX_URL",
             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "PYTHONUTF8", "PYTHONIOENCODING"]
-    detail = [f"{k} = {os.environ[k]}" for k in keys if os.environ.get(k)]
+    # 代理地址与私有 index-url 常内嵌 user:pass@/user:token@，报告会被导出或粘贴到 issue，
+    # 一律走与 Rust 侧同规则的脱敏，避免凭据明文落盘。
+    detail = [f"{k} = {redact_url(os.environ[k])}" for k in keys if os.environ.get(k)]
     return _out("python.env_vars", "相关环境变量", "info", detail or ["未设置相关环境变量"])
 
 

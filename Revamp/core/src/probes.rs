@@ -8,12 +8,19 @@
 //!   构建，不存在任何运行时输入到命令名的连接点；
 //! - 参数全部为编译期常量字面量；
 //! - 所有子进程不走 shell 解释（netsh 的代码页切换通过 cmd 的参数拆分实现，
-//!   各段均为字面量）；
+//!   各段均为字面量；`.cmd`/`.bat` 垫片经 `cmd /C` 启动，参数同样为字面量）；
 //! - stdout/stderr 由独立线程排空，避免管道写满死锁；Windows 下附加
 //!   CREATE_NO_WINDOW，GUI 调用时不弹控制台窗口。
+//!
+//! 健壮性设计：
+//! - Windows 下按 PATHEXT 解析程序名（`npm` 实际是 `npm.cmd`，Rust 的 `Command`
+//!   不会去找它，会误报"未安装"）；
+//! - 超时用 `taskkill /T` 杀整棵进程树，并给管道排空设上界，避免孙进程持有管道
+//!   写端导致检查线程永久挂死。
 
 use std::io::Read;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// 允许执行的工具白名单。
@@ -44,70 +51,91 @@ pub enum Tool {
     Podman,
 }
 
+/// Windows 上按 PATHEXT 在 PATH 中解析可执行文件。
+///
+/// 存在的理由：Rust 的 `Command::new("npm")` 只按 PATH 试「原名」与「原名 + .exe」两种形态，
+/// **不读 PATHEXT**；而 Node 官方安装包提供的是 `npm.cmd`（没有 `npm.exe`），于是 spawn 直接
+/// 返回 NotFound —— 把「已安装」误报成「未安装」。这里显式按 PATHEXT 顺序查找：
+/// 命中 `.exe`/`.com` 直接执行（与旧行为一致），命中 `.cmd`/`.bat` 交给 `cmd /C` 启动。
+#[cfg(windows)]
+fn resolve_program(program: &str) -> Option<std::path::PathBuf> {
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    let exts: Vec<String> = pathext
+        .split(';')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        for ext in &exts {
+            let cand = dir.join(format!("{program}{ext}"));
+            if cand.is_file() {
+                return Some(cand);
+            }
+        }
+    }
+    None
+}
+
+/// 构建工具命令；Windows 下额外处理 `.cmd`/`.bat` 垫片。
+///
+/// 安全性不变：`program` 与 `args` 全部来自编译期字面量（见 `Tool::command`），
+/// 不存在运行时输入进入命令名的通路；`.cmd` 走 `cmd /C` 时参数也仍为字面量。
+///
+/// 解析不到时**退回裸名**而不是 `cmd /C`，目的是让 `spawn` 仍以 `ErrorKind::NotFound`
+/// 失败，上层据此报「未安装」；否则 cmd 会返回退出码 1 + "不是内部或外部命令"，
+/// 被误判成「已安装但版本解析失败」。
+#[cfg(windows)]
+fn shim(program: &str, args: &[&str]) -> Command {
+    match resolve_program(program) {
+        Some(p) => {
+            let is_script = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
+                .unwrap_or(false);
+            let mut c = if is_script {
+                let mut c = Command::new("cmd");
+                c.arg("/C").arg(&p);
+                c
+            } else {
+                Command::new(&p)
+            };
+            c.args(args);
+            c
+        }
+        None => {
+            let mut c = Command::new(program);
+            c.args(args);
+            c
+        }
+    }
+}
+
+/// 非 Windows：程序名交给系统按 PATH 解析（POSIX 下脚本与二进制同等对待）。
+#[cfg(not(windows))]
+fn shim(program: &str, args: &[&str]) -> Command {
+    let mut c = Command::new(program);
+    c.args(args);
+    c
+}
+
 impl Tool {
     /// 每个工具的命令行在此以字面量构建（白名单的唯一入口）。
     pub fn command(self) -> Command {
         match self {
-            Tool::Git => {
-                let mut c = Command::new("git");
-                c.args(["--version"]);
-                c
-            }
-            Tool::Node => {
-                let mut c = Command::new("node");
-                c.args(["--version"]);
-                c
-            }
-            Tool::Npm => {
-                let mut c = Command::new("npm");
-                c.args(["-v"]);
-                c
-            }
-            Tool::Java => {
-                let mut c = Command::new("java");
-                c.args(["-version"]);
-                c
-            }
-            Tool::Go => {
-                let mut c = Command::new("go");
-                c.args(["version"]);
-                c
-            }
-            Tool::Rustc => {
-                let mut c = Command::new("rustc");
-                c.args(["--version"]);
-                c
-            }
-            Tool::Cargo => {
-                let mut c = Command::new("cargo");
-                c.args(["--version"]);
-                c
-            }
-            Tool::Gcc => {
-                let mut c = Command::new("gcc");
-                c.args(["--version"]);
-                c
-            }
-            Tool::Gxx => {
-                let mut c = Command::new("g++");
-                c.args(["--version"]);
-                c
-            }
-            Tool::Make => {
-                let mut c = Command::new("make");
-                c.args(["--version"]);
-                c
-            }
-            Tool::DotNet => {
-                let mut c = Command::new("dotnet");
-                c.args(["--version"]);
-                c
-            }
-            Tool::Python => {
-                let mut c = Command::new("python");
-                c.args(["--version"]);
-                c
-            }
+            Tool::Git => shim("git", &["--version"]),
+            Tool::Node => shim("node", &["--version"]),
+            Tool::Npm => shim("npm", &["-v"]),
+            Tool::Java => shim("java", &["-version"]),
+            Tool::Go => shim("go", &["version"]),
+            Tool::Rustc => shim("rustc", &["--version"]),
+            Tool::Cargo => shim("cargo", &["--version"]),
+            Tool::Gcc => shim("gcc", &["--version"]),
+            Tool::Gxx => shim("g++", &["--version"]),
+            Tool::Make => shim("make", &["--version"]),
+            Tool::DotNet => shim("dotnet", &["--version"]),
+            Tool::Python => shim("python", &["--version"]),
             Tool::NetshState => {
                 let mut c = Command::new("cmd");
                 c.args([
@@ -140,36 +168,12 @@ impl Tool {
                 ]);
                 c
             }
-            Tool::CurlIpify => {
-                let mut c = Command::new("curl");
-                c.args(["-s", "-m", "8", "https://api.ipify.org"]);
-                c
-            }
-            Tool::Docker => {
-                let mut c = Command::new("docker");
-                c.args(["--version"]);
-                c
-            }
-            Tool::DockerInfo => {
-                let mut c = Command::new("docker");
-                c.args(["info", "--format", "{{.ServerVersion}}"]);
-                c
-            }
-            Tool::DockerImages => {
-                let mut c = Command::new("docker");
-                c.args(["images", "-q"]);
-                c
-            }
-            Tool::DockerPs => {
-                let mut c = Command::new("docker");
-                c.args(["ps", "-q"]);
-                c
-            }
-            Tool::Podman => {
-                let mut c = Command::new("podman");
-                c.args(["--version"]);
-                c
-            }
+            Tool::CurlIpify => shim("curl", &["-s", "-m", "8", "https://api.ipify.org"]),
+            Tool::Docker => shim("docker", &["--version"]),
+            Tool::DockerInfo => shim("docker", &["info", "--format", "{{.ServerVersion}}"]),
+            Tool::DockerImages => shim("docker", &["images", "-q"]),
+            Tool::DockerPs => shim("docker", &["ps", "-q"]),
+            Tool::Podman => shim("podman", &["--version"]),
         }
     }
 
@@ -226,6 +230,62 @@ impl CmdOut {
     }
 }
 
+/// 管道排空的宽限时间。
+///
+/// 直接子进程被杀之后，若它已把 stdout/stderr 继承给孙进程（`cmd /C`、`docker`、
+/// `powershell` 这类都可能），管道写端不会随之关闭，`read_to_end` 可能**永不返回**：
+/// 检查线程永久挂死，行尾的 join 也就永远等不到结果。这里给排空设定上界 ——
+/// 宁可丢弃这次输出（该检查本来就会被判超时），也不让一项检查把整轮拖死。
+const DRAIN_GRACE: Duration = Duration::from_secs(5);
+
+/// 后台排空管道，返回结果通道。
+fn drain_async(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<String> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut b = Vec::new();
+        let _ = pipe.read_to_end(&mut b);
+        let _ = tx.send(decode_bytes(&b));
+    });
+    rx
+}
+
+/// 等待排空结果；超时返回空串（此时排空线程已脱离，其输出被丢弃）。
+fn collect(rx: mpsc::Receiver<String>, budget: Duration) -> String {
+    rx.recv_timeout(budget).unwrap_or_default()
+}
+
+/// 杀掉子进程**及其整棵进程树**。
+///
+/// `Child::kill` 只能杀直接子进程。`cmd /C foo`、`docker`、`powershell` 这类命令会在运行期
+/// 再派孙进程，而孙进程继承着 stdout/stderr 句柄 —— 只杀直接子进程的话管道写端不关闭，
+/// 排空线程会一直等（见 `DRAIN_GRACE`），被杀的进程树也继续占着 CPU/网络/文件锁。
+///
+/// Windows 下改用系统自带的 `taskkill /T /F /PID`：命令名是字面量，PID 由系统给出、
+/// 只含数字，不构成注入面。taskkill 不可用或目标已退出时退回 `Child::kill`。
+#[cfg(windows)]
+fn kill_tree(child: &mut std::process::Child) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let pid = child.id().to_string();
+    let mut c = Command::new("taskkill");
+    c.args(["/T", "/F", "/PID", &pid])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
+    let killed = c.status().map(|s| s.success()).unwrap_or(false);
+    if !killed {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+}
+
+#[cfg(not(windows))]
+fn kill_tree(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// 执行白名单工具并限时回收。stdout/stderr 由独立线程排空，避免管道写满死锁。
 pub fn run_tool(tool: Tool, timeout: Duration) -> CmdOut {
     run_with_timeout(tool.command(), timeout)
@@ -257,18 +317,10 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CmdOut {
         }
     };
 
-    let mut out_pipe = child.stdout.take().expect("stdout 已声明 piped");
-    let mut err_pipe = child.stderr.take().expect("stderr 已声明 piped");
-    let t_out = std::thread::spawn(move || {
-        let mut b = Vec::new();
-        let _ = out_pipe.read_to_end(&mut b);
-        decode_bytes(&b)
-    });
-    let t_err = std::thread::spawn(move || {
-        let mut b = Vec::new();
-        let _ = err_pipe.read_to_end(&mut b);
-        decode_bytes(&b)
-    });
+    let out_pipe = child.stdout.take().expect("stdout 已声明 piped");
+    let err_pipe = child.stderr.take().expect("stderr 已声明 piped");
+    let t_out = drain_async(out_pipe);
+    let t_err = drain_async(err_pipe);
 
     let deadline = Instant::now() + timeout;
     let mut timed_out = false;
@@ -277,8 +329,7 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CmdOut {
             Ok(Some(st)) => break Some(st),
             Ok(None) => {
                 if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    kill_tree(&mut child);
                     timed_out = true;
                     break None;
                 }
@@ -296,8 +347,8 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CmdOut {
         }
     };
 
-    let stdout = t_out.join().unwrap_or_default();
-    let stderr = t_err.join().unwrap_or_default();
+    let stdout = collect(t_out, DRAIN_GRACE);
+    let stderr = collect(t_err, DRAIN_GRACE);
     match status {
         Some(st) => CmdOut { success: st.success(), stdout, stderr, timed_out, not_found: false },
         None => CmdOut { success: false, stdout, stderr, timed_out, not_found: false },
@@ -324,5 +375,53 @@ mod tests {
         let w = to_wide("C:\\");
         assert_eq!(w.last(), Some(&0));
         assert_eq!(w.len(), 4);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_program_handles_pathext() {
+        // cmd.exe 必然存在于 System32，且必须被解析为可执行形态（exe/com），
+        // 不能解析成 extensionless 的 shell 脚本 —— 后者 CreateProcess 起不来。
+        let p = resolve_program("cmd").expect("应解析到 cmd");
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        assert!(ext == "exe" || ext == "com", "解析结果异常: {p:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_program_missing_tool_is_none() {
+        assert!(resolve_program("envdoctor-no-such-tool-xyz").is_none());
+    }
+
+    #[test]
+    fn missing_program_is_reported_as_not_found() {
+        // 上层靠 not_found 判定"未安装"，解析失败时必须保持这条通路
+        let out = run_with_timeout(
+            Command::new("envdoctor-no-such-tool-xyz"),
+            Duration::from_secs(2),
+        );
+        assert!(out.not_found, "应判定为 not_found，stderr = {}", out.stderr);
+        assert!(!out.success);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn timeout_kills_process_tree_and_returns_promptly() {
+        // cmd 会再派 ping 孙进程并让它继承管道：只杀直接子进程的话管道不会关闭，
+        // 这里同时验证 taskkill /T 与排空上界，够快才说明进程树确实被收掉了。
+        let mut c = Command::new("cmd");
+        c.args(["/C", "ping", "-n", "6", "127.0.0.1"]);
+        let t0 = Instant::now();
+        let out = run_with_timeout(c, Duration::from_millis(300));
+        let elapsed = t0.elapsed();
+        assert!(out.timed_out, "应判定为超时");
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "超时后应迅速返回（进程树未回收会拖到排水上界），实际 {elapsed:?}"
+        );
     }
 }

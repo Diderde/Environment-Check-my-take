@@ -62,7 +62,12 @@ class RunWorker(QThread):
 
     def run(self) -> None:  # QThread 入口（工作线程）
         def cb(done: int, total: int, current: str) -> None:
-            self.progress_sig.emit(done, total, current)
+            # 回调在 Rust 引擎线程里执行：这里抛异常会被 ctypes 吞掉并污染 stderr，
+            # 因此任何界面侧问题都就地消化。
+            try:
+                self.progress_sig.emit(done, total, current)
+            except RuntimeError:
+                pass  # 窗口/接收者已销毁
 
         try:
             rust_report = self.core.run(self.config, progress=cb, cancel=self.token)
@@ -71,6 +76,9 @@ class RunWorker(QThread):
         except Exception as e:  # noqa: BLE001 —— 界面必须拿到失败原因而不是静默
             report = {"results": [], "summary": {"counts": {}, "problems": []},
                       "error": f"{type(e).__name__}: {e}", "platform": "", "duration_ms": 0}
+        finally:
+            # 令牌必须活到 core.run 返回之后才能回收（引擎运行期间持有它的引用）
+            self.token.close()
         self.done_sig.emit(report, self.generation)
 
 
@@ -133,12 +141,18 @@ class MainWindow(QMainWindow):
             self._worker.token.trigger()
 
     def closeEvent(self, event) -> None:
-        """关窗时取消诊断并等待工作线程收尾，避免进程滞留。"""
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.token.trigger()
-            self._worker.wait(5000)
-            if self._worker.isRunning():
-                self._worker.terminate()  # 兜底：取消后仍未结束才强制终止
+        """关窗时取消诊断并等它收尾。
+
+        这里**不用** `QThread::terminate()`：Rust 引擎会在 ctypes 回调里回到 Python，
+        而回调期间 GIL 由 ctypes 持有 —— 强杀线程可能停在这一帧上，导致解释器死锁或
+        状态损坏。取消令牌已让引擎尽快返回；即便它没来得及结束，进程退出时线程会被
+        系统收回，Qt 也会在窗口销毁时断开队列连接，不会有"对着已销毁控件发信号"的问题。
+        """
+        worker = self._worker
+        if worker is not None and worker.isRunning():
+            worker.token.trigger()
+            if not worker.wait(5000):
+                self.statusBar().showMessage("诊断线程未在 5s 内结束，随窗口一起退出")
         event.accept()
 
     def export_json(self) -> None:
