@@ -49,6 +49,7 @@ python -m venv .venv
 
 ```bash
 envdoctor                        # 全量诊断，分类折叠显示
+envdoctor --list-checks          # 列出全部检查项
 envdoctor run -E                 # 展开全部明细
 envdoctor run -c python -c network -e network   # 选类别并展开
 envdoctor run --require git,node # 声明必备工具，缺失记 FAIL
@@ -59,6 +60,18 @@ envdoctor gui                    # PySide6 图形界面
 ```
 
 退出码：存在 FAIL 级问题时为 1（可直接用于 CI/脚本）。
+
+## FFI 约定（Rust ↔ Python）
+
+- 报告 JSON 由 Rust 以 `CString::into_raw` 移交，Python 侧解析后**必须**调用
+  `envdoctor_string_free` 归还（`CString::from_raw` 配对回收），否则泄漏；
+- 取消令牌 `envdoctor_cancel_new / trigger / free` 同样严格配对；
+- `envdoctor_run` 内部以 `catch_unwind` 隔离 panic：不会跨 FFI 展开，失败转为报告的
+  `error` 字段，Python 侧可见；
+- `CDLL` 调用期间 ctypes 自动释放 GIL（GUI 不卡顿）；进度回调由 ctypes 在引擎线程
+  进入 Python 前自动获取 GIL，界面层负责再切回自己的主线程（Qt 信号 / call_from_thread）；
+- `#[no_mangle]` + `crate-type = ["cdylib"]` 保证符号可被 ctypes 按原名找到；
+  Python 侧所有导出函数均显式声明 `argtypes` / `restype`。
 
 ## 测试
 

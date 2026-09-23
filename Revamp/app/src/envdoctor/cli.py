@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -35,9 +36,6 @@ class _Palette:
     def status(self, status: str, icon: bool = False) -> str:
         text = _STATUS_ICON.get(status, "·") if icon else status
         return self.paint(text, _COLOR.get(status, "0"))
-
-
-import os  # noqa: E402  （放置在 Palette 之后仅为阅读顺序）
 
 
 def _load_core(core_path: Path | None) -> Core:
@@ -99,10 +97,15 @@ def _print_report(report: dict, pal: _Palette, expanded: set[str], expand_all: b
 def _default(
     ctx: typer.Context,
     version: bool = typer.Option(False, "--version", help="显示版本"),
+    list_checks: bool = typer.Option(False, "--list-checks", help="列出全部检查项"),
 ):
     if version:
         core = _load_core(None)
         typer.echo(f"envdoctor {__import__('envdoctor').__version__} / core {core.version()}")
+        raise typer.Exit()
+    if list_checks:
+        for d in pychecks.py_check_defs():
+            typer.echo(f"{d['category']:12} {d['id']:30} {d['title']}")
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         ctx.invoke(run)
@@ -120,16 +123,10 @@ def run(
     txt_out: Path = typer.Option(None, "--txt", help="导出 Markdown 报告到该路径"),
     no_color: bool = typer.Option(False, "--no-color"),
     core: Path = typer.Option(None, "--core", envvar="ENVDOCTOR_CORE_PATH", help="核心 DLL 路径"),
-    list_checks: bool = typer.Option(False, "--list-checks", help="仅列出全部检查项"),
 ):
     """运行完整诊断。默认折叠为分类摘要；未指定的类别按检测结果出现顺序追加。"""
     pal = _Palette(enabled=not no_color and sys.stdout.isatty())
     core_obj = _load_core(core)
-
-    if list_checks:
-        for d in pychecks.py_check_defs():
-            typer.echo(f"{d['category']:12} {d['id']}")
-        raise typer.Exit()
 
     cfg = {
         "categories": category or None,
@@ -142,14 +139,35 @@ def run(
     else:
         allowed = None
 
+    is_tty = sys.stdout.isatty()
+
+    def on_progress(done: int, total_n: int, current: str) -> None:
+        # 单行覆盖式进度（GBK 控制台安全，纯 ASCII + 中文）
+        sys.stdout.write(f"\r[进度] {done}/{total_n}  {current}   ")
+        sys.stdout.flush()
+
     typer.echo(pal.paint("正在运行诊断（系统类检查由 Rust 核心并发执行）…", "90"))
     token = core_obj.new_cancel_token()
     try:
-        rust_report = core_obj.run(cfg, cancel=token)
+        rust_report = core_obj.run(
+            cfg, progress=on_progress if is_tty else None, cancel=token
+        )
+        want_py = not category or "python" in category
+        py_total = len(pychecks.py_check_defs()) if want_py else 0
         py_cfg = {"timeout_secs": timeout}
-        py_results = pychecks.run_python_checks(py_cfg, categories=category or None)
+        rust_n = len(rust_report.get("results", []))
+        py_results = pychecks.run_python_checks(
+            py_cfg,
+            categories=category or None,
+            progress=on_progress if is_tty and py_total else None,
+            done_offset=rust_n,
+            total=rust_n + py_total,
+        )
     finally:
         token.close()
+    if is_tty:
+        sys.stdout.write("\r" + " " * 70 + "\r")
+        sys.stdout.flush()
 
     # 未选择的类别不展示
     report = merge_reports(rust_report, py_results)

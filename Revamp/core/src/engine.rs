@@ -99,6 +99,10 @@ pub fn run(
     let deadline = Instant::now() + budget;
     let mut received: Vec<Outcome> = Vec::with_capacity(total as usize);
     while received.len() < total as usize {
+        // 取消后立即停止收集：未返回的项在下方统一记 SKIP
+        if cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
+            break;
+        }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             break;

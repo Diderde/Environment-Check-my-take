@@ -132,6 +132,15 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.token.trigger()
 
+    def closeEvent(self, event) -> None:
+        """关窗时取消诊断并等待工作线程收尾，避免进程滞留。"""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.token.trigger()
+            self._worker.wait(5000)
+            if self._worker.isRunning():
+                self._worker.terminate()  # 兜底：取消后仍未结束才强制终止
+        event.accept()
+
     def export_json(self) -> None:
         if not self._last_report:
             return
