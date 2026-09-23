@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths: ["Revamp/**", ".github/workflows/**"]
+  pull_request:
+    paths: ["Revamp/**", ".github/workflows/**"]
+
+jobs:
+  rust:
+    name: Rust 核心（test + clippy）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "Revamp/core"
+      - name: cargo test
+        run: cargo test --release --manifest-path Revamp/core/Cargo.toml
+        env:
+          CARGO_HTTP_CHECK_REVOKE: "false"
+      - name: cargo clippy（-D warnings）
+        run: cargo clippy --release --manifest-path Revamp/core/Cargo.toml -- -D warnings
+        env:
+          CARGO_HTTP_CHECK_REVOKE: "false"
+
+  python:
+    name: Python（unittest，干净环境）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖（含 GUI/TUI extras，顺带校验 pyproject）
+        run: python -m pip install -e "Revamp/app[gui,tui]"
+      - name: unittest（CI 机不带 PYTHONUTF8，等价本机干净环境）
+        working-directory: Revamp
+        run: python -m unittest discover -s tests -v

@@ -193,7 +193,9 @@ class DecodeTest(unittest.TestCase):
         raw = "中文安装路径".encode("gbk")
         with self.assertRaises(UnicodeDecodeError):
             raw.decode("utf-8")
-        self.assertEqual(pychecks._spade_echo(raw), "中文安装路径")
+        # 显式钉死 fallback 编码：不依赖宿主机的 ANSI 代码页（cp1252 机器上同样能过）
+        with mock.patch.object(pychecks.locale, "getpreferredencoding", return_value="gbk"):
+            self.assertEqual(pychecks._spade_echo(raw), "中文安装路径")
 
     def test_empty_and_none(self):
         self.assertEqual(pychecks._spade_echo(None), "")
@@ -457,11 +459,18 @@ class CodepageTest(unittest.TestCase):
         def __init__(self, cp):
             self.kernel32 = CodepageTest._K32(cp)
 
-    def _run(self, cp, stdout_enc):
+    def _run(self, cp, stdout_enc, env_overrides: dict | None = None):
         fake = self._Windll(cp)
         stub_out = type("S", (), {"encoding": stdout_enc})()
-        with mock.patch.object(pychecks.ctypes, "windll", fake), \
+        # 先清掉宿主机的 PYTHONUTF8/PYTHONIOENCODING（它们会改变被测代码的 UTF-8 模式判定），
+        # 再套用测试自己的覆写。
+        with mock.patch.dict(os.environ, {"PYTHONUTF8": "", "PYTHONIOENCODING": ""}), \
+                mock.patch.object(pychecks.ctypes, "windll", fake), \
                 mock.patch.object(sys, "stdout", stub_out):
+            os.environ.pop("PYTHONUTF8", None)
+            os.environ.pop("PYTHONIOENCODING", None)
+            for k, v in (env_overrides or {}).items():
+                os.environ[k] = v
             return pychecks.axel_syrios({})
 
     def test_warns_when_output_encoding_is_not_utf8(self):
@@ -474,8 +483,7 @@ class CodepageTest(unittest.TestCase):
         self.assertEqual(self._run(65001, "utf-8")["status"], "ok")
 
     def test_ok_when_utf8_mode_env(self):
-        with mock.patch.dict(os.environ, {"PYTHONUTF8": "1"}):
-            self.assertEqual(self._run(936, "cp936")["status"], "ok")
+        self.assertEqual(self._run(936, "cp936", {"PYTHONUTF8": "1"})["status"], "ok")
 
 
 class PermissionsTest(unittest.TestCase):
@@ -538,7 +546,8 @@ class HostsTest(unittest.TestCase):
 
     def test_gbk_hosts_does_not_crash(self):
         raw = "# 中文注释\n127.0.0.1 localhost\n".encode("gbk")
-        self.assertIn("中文注释", pychecks._spade_echo(raw))
+        with mock.patch.object(pychecks.locale, "getpreferredencoding", return_value="gbk"):
+            self.assertIn("中文注释", pychecks._spade_echo(raw))
 
 
 class SslCheckTest(unittest.TestCase):

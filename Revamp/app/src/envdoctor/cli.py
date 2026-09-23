@@ -252,8 +252,18 @@ def run(
                 fg=typer.colors.YELLOW, err=True,
             )
 
+    known_categories = set(CATEGORIES)
+    valid_categories = [c for c in category if c in known_categories]
+    unknown_cat = [c for c in category if c not in known_categories]
+    if unknown_cat:
+        typer.secho(
+            f"警告: --category 中这些类别没有对应的检查项，将被忽略: "
+            f"{', '.join(unknown_cat)}（可用: {', '.join(sorted(known_categories))}）",
+            fg=typer.colors.YELLOW, err=True,
+        )
+
     cfg = {
-        "categories": category or None,
+        "categories": valid_categories or None,
         "required": required or None,
         "net_full": net_full,
         "timeout_secs": timeout,
