@@ -1,0 +1,10 @@
+# 本地环境与构建产物
+.venv/
+__pycache__/
+*.pyc
+core/target/
+*.egg-info/
+.mimosa/
+rustup-init.exe
+report.json
+envdoctor-report.json
