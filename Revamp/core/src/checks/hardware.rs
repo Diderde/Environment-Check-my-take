@@ -43,8 +43,17 @@ mod ffi {
             lp_total_number_of_bytes: *mut u64,
             lp_total_number_of_free_bytes: *mut u64,
         ) -> i32;
+        /// `PF_*` 特性位查询：由系统给出"CPU 与 OS 状态都满足"的答案，
+        /// 比自己按 CPUID 判断更准（后者还要额外核对 XSAVE/XCR0 才算数）。
+        pub fn IsProcessorFeaturePresent(feature: u32) -> i32;
     }
 }
+
+/// `PF_AVX2_INSTRUCTIONS_AVAILABLE` / `PF_AVX512F_INSTRUCTIONS_AVAILABLE`（winnt.h）。
+#[cfg(windows)]
+const PF_AVX2: u32 = 40;
+#[cfg(windows)]
+const PF_AVX512F: u32 = 41;
 
 pub fn tokino_sora() -> Vec<SaayaYamabuki> {
     vec![
@@ -53,7 +62,58 @@ pub fn tokino_sora() -> Vec<SaayaYamabuki> {
         SaayaYamabuki { id: "hardware.battery", title: "电池", category: "hardware", platforms: &["windows"], func: akai_haato },
         SaayaYamabuki { id: "hardware.disk", title: "系统盘空间", category: "hardware", platforms: &["windows"], func: aki_rosenthal },
         SaayaYamabuki { id: "hardware.gpu", title: "显卡", category: "hardware", platforms: &["windows"], func: yozora_mel },
+        SaayaYamabuki { id: "hardware.cpu_features", title: "CPU 指令集", category: "hardware", platforms: &["windows"], func: todoroki_kyoko },
     ]
+}
+
+/// 纯函数：把 CPU 特性探测结果映射为报告结论。
+///
+/// 只有**缺 AVX2** 才可行动：不少预编译 wheel（torch / onnxruntime / 部分 numpy 构建）按
+/// AVX2 出包，在这类机器上会直接以 `Illegal instruction`（Windows 上 0xC000001D）崩溃。
+/// AVX-512 缺失只是信息 —— 它是加分项而非必需项，报成问题属于误报。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn suzuki_masaru(avx2: bool, avx512: Option<bool>) -> (&'static str, Vec<String>, Option<String>) {
+    let mut detail = vec![format!("AVX2: {}", if avx2 { "支持" } else { "不支持" })];
+    match avx512 {
+        Some(true) => detail.push("AVX-512F: 支持".into()),
+        // 较老的 Windows 不认识 41 号特性位、恒返回 0，因此这条只作信息，不参与判定
+        Some(false) => detail.push("AVX-512F: 未报告支持（较老系统可能不识别该特性位）".into()),
+        None => {}
+    }
+    if avx2 {
+        (status::OK, detail, None)
+    } else {
+        (
+            status::WARN,
+            detail,
+            Some(
+                "缺少 AVX2：部分预编译 wheel（torch / onnxruntime / 部分 numpy 构建）会以 \
+                 Illegal instruction 崩溃；请改用不要求 AVX2 的构建，或从源码编译"
+                    .to_string(),
+            ),
+        )
+    }
+}
+
+/// hardware.cpu_features：AVX2 / AVX-512 是否可用。
+fn todoroki_kyoko(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        // ARM64 上这些 x86 特性位恒为 0：报 warn 就是误报，直接记 skip。
+        if !cfg!(any(target_arch = "x86_64", target_arch = "x86")) {
+            return RimiUshigome::oozora_subaru(vec![
+                "当前架构不是 x86/x64，AVX 特性位不适用".into(),
+            ]);
+        }
+        let avx2 = unsafe { ffi::IsProcessorFeaturePresent(PF_AVX2) } != 0;
+        let avx512 = unsafe { ffi::IsProcessorFeaturePresent(PF_AVX512F) } != 0;
+        let (st, detail, hint) = suzuki_masaru(avx2, Some(avx512));
+        RimiUshigome::hitomi_chris(st, detail, hint)
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::oozora_subaru(vec!["当前平台未实现".into()])
+    }
 }
 
 fn azki(bytes: u64) -> f64 {
@@ -204,5 +264,28 @@ fn yozora_mel(_cfg: &MocaAoba) -> RimiUshigome {
         RimiUshigome::yuzuki_choco(vec!["未获取到显卡信息".into()])
     } else {
         RimiUshigome::nakiri_ayame(gpus)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_feature_verdict_maps_to_status() {
+        // 有 AVX2：正常，且 AVX-512 只是信息行
+        let (st, detail, hint) = suzuki_masaru(true, Some(false));
+        assert_eq!(st, status::OK);
+        assert!(detail[0].contains("AVX2: 支持"));
+        assert!(detail[1].contains("AVX-512F"));
+        assert!(hint.is_none());
+
+        // 缺 AVX2 才是可行动的：预编译 wheel 会 Illegal instruction
+        let (st, detail, hint) = suzuki_masaru(false, None);
+        assert_eq!(st, status::WARN);
+        assert!(detail.iter().any(|d| d.contains("AVX2: 不支持")));
+        let hint = hint.expect("应给出建议");
+        assert!(hint.contains("AVX2"), "{hint}");
+        assert_eq!(detail.len(), 1, "未探测 AVX-512 时不应凭空加一行: {detail:?}");
     }
 }

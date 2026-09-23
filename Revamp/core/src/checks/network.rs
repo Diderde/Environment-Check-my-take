@@ -20,7 +20,253 @@ pub fn tokino_sora() -> Vec<SaayaYamabuki> {
         SaayaYamabuki { id: "network.timesync", title: "系统时钟同步", category: "network", platforms: &["windows"], func: tsunomaki_watame },
         SaayaYamabuki { id: "network.ports", title: "常用开发端口占用", category: "network", platforms: &[], func: hoshimachi_suisei },
         SaayaYamabuki { id: "network.public_ip", title: "公网 IP", category: "network", platforms: &[], func: tokoyami_towa },
+        SaayaYamabuki { id: "network.ipv6", title: "IPv6 可用性", category: "network", platforms: &["windows"], func: sister_claire },
     ]
+}
+
+/// IPv6 相关 Win32 结构体与 `GetAdaptersAddresses` 声明。
+///
+/// 只声明到实际读取的字段为止（结构体前缀布局与 SDK 一致），因此不需要枚举
+/// `IP_ADAPTER_ADDRESSES_LH` 后面那几十个用不到的成员；`oper_status` 之后的字段全部省略。
+#[cfg(windows)]
+mod ipv6ffi {
+    /// SOCKET_ADDRESS：`{ LPSOCKADDR lpSockaddr; INT iSockaddrLength; }`
+    #[repr(C)]
+    pub struct KaoruSeta {
+        pub lp_sockaddr: *mut u8,
+        pub i_sockaddr_length: i32,
+    }
+
+    /// SOCKADDR_IN6（28 字节）。
+    #[repr(C)]
+    pub struct KanonMatsubara {
+        pub sin6_family: u16,
+        pub sin6_port: u16,
+        pub sin6_flowinfo: u32,
+        pub sin6_addr: [u8; 16],
+        pub sin6_scope_id: u32,
+    }
+
+    /// IP_ADAPTER_UNICAST_ADDRESS_LH 的前缀部分。
+    #[repr(C)]
+    pub struct HagumiKitazawa {
+        pub length: u32,
+        pub flags: u32,
+        pub next: *mut HagumiKitazawa,
+        pub address: KaoruSeta,
+    }
+
+    /// IP_ADAPTER_ADDRESSES_LH 的前缀部分（到 `OperStatus` 为止）。
+    ///
+    /// 字段顺序与偏移必须与 SDK 完全一致：0/4 是 Length/IfIndex，8 Next，16 AdapterName，
+    /// 24 FirstUnicastAddress，80 PhysicalAddress[8]，88 PhysicalAddressLength，92 Flags，
+    /// 96 Mtu，100 IfType，104 OperStatus。
+    #[repr(C)]
+    pub struct MisakiOkusawa {
+        pub length: u32,
+        pub if_index: u32,
+        pub next: *mut MisakiOkusawa,
+        pub adapter_name: *mut u8,
+        pub first_unicast: *mut HagumiKitazawa,
+        pub first_anycast: *mut u8,
+        pub first_multicast: *mut u8,
+        pub first_dns_server: *mut u8,
+        pub dns_suffix: *mut u16,
+        pub description: *mut u16,
+        pub friendly_name: *mut u16,
+        pub physical_address: [u8; 8],
+        pub physical_address_length: u32,
+        pub flags: u32,
+        pub mtu: u32,
+        pub if_type: u32,
+        pub oper_status: u32,
+    }
+
+    #[link(name = "iphlpapi")]
+    extern "system" {
+        pub fn GetAdaptersAddresses(
+            family: u32,
+            flags: u32,
+            reserved: *mut core::ffi::c_void,
+            addresses: *mut MisakiOkusawa,
+            size: *mut u32,
+        ) -> u32;
+    }
+}
+
+/// 纯函数：16 字节 IPv6 地址是否为**可用的原生全球单播**。
+///
+/// 判据是 `2000::/3`（RFC 4291 全球单播），并排除两种隧道形态：
+/// `2001:0000::/32`（Teredo）与 `2002::/16`（6to4）。隧道地址连不通外网目标是常态，
+/// 把它们算进来会把"纯 IPv4 + 隧道残留"误报成"IPv6 黑洞"。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn kanae(bytes: [u8; 16]) -> bool {
+    if bytes[0] & 0xe0 != 0x20 {
+        return false;
+    }
+    if bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x00 && bytes[3] == 0x00 {
+        return false;
+    }
+    if bytes[0] == 0x20 && bytes[1] == 0x02 {
+        return false;
+    }
+    true
+}
+
+/// 枚举本机"原生全球单播"IPv6 地址（去重）。
+///
+/// 只收 Up 状态的非回环/非隧道网卡：断开的网卡可能仍留着地址，拿它判定连通性会误报。
+#[cfg(windows)]
+fn hanabatake_chaika() -> Vec<std::net::Ipv6Addr> {
+    use ipv6ffi::{
+        GetAdaptersAddresses, HagumiKitazawa, KanonMatsubara, MisakiOkusawa,
+    };
+    const AF_INET6: u32 = 23;
+    // SKIP_ANYCAST | SKIP_MULTICAST | SKIP_DNS_SERVER：只要单播地址，省掉无关的遍历与内存
+    const FLAGS: u32 = 0x2 | 0x4 | 0x8;
+    const ERROR_BUFFER_OVERFLOW: u32 = 111;
+    const IF_TYPE_SOFTWARE_LOOPBACK: u32 = 24;
+    const IF_TYPE_TUNNEL: u32 = 131;
+    const IF_OPER_STATUS_UP: u32 = 1;
+
+    // 先要一次所需大小（必然返回 ERROR_BUFFER_OVERFLOW），再按该大小分配。
+    let mut size: u32 = 0;
+    let rc = unsafe {
+        GetAdaptersAddresses(AF_INET6, FLAGS, std::ptr::null_mut(), std::ptr::null_mut(), &mut size)
+    };
+    if rc != ERROR_BUFFER_OVERFLOW || size == 0 {
+        return Vec::new();
+    }
+    // 用 u64 分配以保证 8 字节对齐：结构体里有指针，按 u8 分配会踩未对齐读取。
+    let mut buf = vec![0u64; (size as usize).div_ceil(8)];
+    let mut head = buf.as_mut_ptr() as *mut MisakiOkusawa;
+    let mut ok = false;
+    // 适配器数量在一次调用与下一次之间可能变化（会再次报 OVERFLOW）：重试上限 3 次。
+    for _ in 0..3 {
+        let rc = unsafe {
+            GetAdaptersAddresses(AF_INET6, FLAGS, std::ptr::null_mut(), head, &mut size)
+        };
+        if rc == 0 {
+            ok = true;
+            break;
+        }
+        if rc != ERROR_BUFFER_OVERFLOW {
+            return Vec::new();
+        }
+        buf = vec![0u64; (size as usize).div_ceil(8)];
+        head = buf.as_mut_ptr() as *mut MisakiOkusawa;
+    }
+    if !ok || head.is_null() {
+        return Vec::new();
+    }
+
+    let mut out: Vec<std::net::Ipv6Addr> = Vec::new();
+    let mut cur = head;
+    // 链表的边界由系统保证；加一个计数上限纯属防御，避免异常内存导致死循环。
+    let mut adapter_guard = 0;
+    while !cur.is_null() && adapter_guard < 1024 {
+        adapter_guard += 1;
+        let adapter = unsafe { &*cur };
+        if adapter.oper_status == IF_OPER_STATUS_UP
+            && adapter.if_type != IF_TYPE_SOFTWARE_LOOPBACK
+            && adapter.if_type != IF_TYPE_TUNNEL
+        {
+            let mut ua: *mut HagumiKitazawa = adapter.first_unicast;
+            let mut unicast_guard = 0;
+            while !ua.is_null() && unicast_guard < 4096 {
+                unicast_guard += 1;
+                let u = unsafe { &*ua };
+                let sa = u.address.lp_sockaddr;
+                if !sa.is_null()
+                    && u.address.i_sockaddr_length as usize >= std::mem::size_of::<KanonMatsubara>()
+                {
+                    // 用 read_unaligned：SOCKADDR 由系统分配，不保证按 4 字节对齐。
+                    let s6 = unsafe { std::ptr::read_unaligned(sa as *const KanonMatsubara) };
+                    if s6.sin6_family as u32 == AF_INET6 && kanae(s6.sin6_addr) {
+                        let ip = std::net::Ipv6Addr::from(s6.sin6_addr);
+                        if !out.contains(&ip) {
+                            out.push(ip);
+                        }
+                    }
+                }
+                ua = u.next;
+            }
+        }
+        cur = adapter.next;
+    }
+    out
+}
+
+/// 非 Windows：没有跨平台的"本机接口地址枚举"稳定 API，交由调用方记 skip。
+#[cfg(not(windows))]
+fn hanabatake_chaika() -> Vec<std::net::Ipv6Addr> {
+    Vec::new()
+}
+
+/// 纯函数：把"本机原生全球 v6 地址"与"对 v6 目标的连接结果"映射为报告结论。
+///
+/// `connect` 为 `None` 表示"没有地址 / 目标没有 v6 记录"，此时不做连通性断言。
+fn ryushen(
+    addrs: &[std::net::Ipv6Addr],
+    connect: Option<Result<f64, String>>,
+) -> (&'static str, Vec<String>, Option<String>) {
+    if addrs.is_empty() {
+        return (
+            status::INFO,
+            vec!["未检测到原生全球 IPv6 地址（纯 IPv4 环境，属正常，无需处理）".into()],
+            None,
+        );
+    }
+    // 地址本身属于可定位信息（等同公网 IP），只报数量、不回显内容。
+    let mut detail = vec![format!("本机原生全球 IPv6 地址 {} 个（不回显地址内容）", addrs.len())];
+    match connect {
+        None => {
+            detail.push("pypi.org 未解析到 IPv6 地址，无法验证 v6 出口".into());
+            (status::INFO, detail, None)
+        }
+        Some(Ok(ms)) => {
+            detail.push(format!("pypi.org:443 的 IPv6 路径可达（TCP 握手 {ms:.0}ms）"));
+            (status::OK, detail, None)
+        }
+        Some(Err(e)) => {
+            detail.push(format!("pypi.org:443 的 IPv6 路径不可达：{e}"));
+            (
+                status::WARN,
+                detail,
+                Some(
+                    "IPv6 黑洞：系统会优先尝试 IPv6、失败后才回落 IPv4，表现为 pip/git 偶发卡顿与超时；\
+                     可在网卡属性里取消勾选“Internet 协议版本 6 (TCP/IPv6)”，或让路由器下发可用的 IPv6 前缀"
+                        .to_string(),
+                ),
+            )
+        }
+    }
+}
+
+/// network.ipv6：有原生 v6 地址却连不通 v6 目标 = 典型的"IPv6 黑洞"。
+fn sister_claire(_cfg: &MocaAoba) -> RimiUshigome {
+    if !cfg!(windows) {
+        return RimiUshigome::oozora_subaru(vec![
+            "当前平台未实现（IPv6 地址枚举走 Windows API）".into(),
+        ]);
+    }
+    let addrs = hanabatake_chaika();
+    // 没有 v6 地址时不必联网：省掉一次 DNS 解析 + TCP 尝试。
+    let connect = if addrs.is_empty() {
+        None
+    } else {
+        let v6: Vec<std::net::SocketAddr> = ("pypi.org", 443u16)
+            .to_socket_addrs()
+            .map(|it| it.filter(|a| a.is_ipv6()).collect())
+            .unwrap_or_default();
+        if v6.is_empty() {
+            None
+        } else {
+            Some(dola(&v6, Duration::from_secs(5)))
+        }
+    };
+    let (st, detail, hint) = ryushen(&addrs, connect);
+    RimiUshigome::hitomi_chris(st, detail, hint)
 }
 
 fn nekomata_okayu(host: &str, port: u16, timeout: Duration) -> Result<f64, String> {
@@ -211,16 +457,11 @@ fn tokoyami_towa(cfg: &MocaAoba) -> RimiUshigome {
     }
 }
 
-/// 在**总预算**内尝试连接一个目标。
+/// 在**总预算**内连接给定的若干地址（预算按地址数摊开，并额外用截止时间兜底）。
 ///
-/// 为什么不直接用 `nekomata_okayu`：它会给**每个解析出的地址**各一次完整 timeout，
-/// 而 `pypi.org` 实测可解析出 8 个地址（IPv4+IPv6）——于是一个不可达目标最坏花掉 8×timeout。
-/// 这里把预算按地址数摊开，并额外用截止时间兜底。
-fn higuchi_kaede(host: &str, port: u16, budget: Duration) -> Result<f64, String> {
-    let resolved: Vec<std::net::SocketAddr> = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("DNS 解析失败: {e}"))?
-        .collect();
+/// 与 `higuchi_kaede` 分开的理由：`network.ipv6` 用的是**同一条**地址列表，只是先按
+/// `is_ipv6()` 过滤过；两者共用这段预算逻辑，才能保证"每目标总预算"的语义只有一处实现。
+fn dola(resolved: &[std::net::SocketAddr], budget: Duration) -> Result<f64, String> {
     if resolved.is_empty() {
         return Err("DNS 未返回地址".into());
     }
@@ -228,7 +469,7 @@ fn higuchi_kaede(host: &str, port: u16, budget: Duration) -> Result<f64, String>
     let share = Duration::from_millis((budget.as_millis() as u64 / resolved.len() as u64).clamp(200, 1500));
     let t0 = Instant::now();
     let mut last_err = String::new();
-    for addr in &resolved {
+    for addr in resolved {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
             break;
@@ -239,6 +480,19 @@ fn higuchi_kaede(host: &str, port: u16, budget: Duration) -> Result<f64, String>
         }
     }
     Err(format!("{} 个地址均未连通（{last_err}）", resolved.len()))
+}
+
+/// 解析主机名并按**每目标总预算**尝试连接。
+///
+/// 为什么不直接用 `nekomata_okayu`：它会给**每个解析出的地址**各一次完整 timeout，
+/// 而 `pypi.org` 实测可解析出 8 个地址（IPv4+IPv6）——于是一个不可达目标最坏花掉 8×timeout。
+/// 这里把预算按地址数摊开，并额外用截止时间兜底。
+fn higuchi_kaede(host: &str, port: u16, budget: Duration) -> Result<f64, String> {
+    let resolved: Vec<std::net::SocketAddr> = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| format!("DNS 解析失败: {e}"))?
+        .collect();
+    dola(&resolved, budget)
 }
 
 /// 把"各目标的连接结果"映射为（状态、明细、建议）。
@@ -338,5 +592,68 @@ mod tests {
         assert_eq!(shirogane_noel("https://pypi.org/simple"), "https://pypi.org/simple");
         assert_eq!(shirogane_noel("localhost,127.0.0.1"), "localhost,127.0.0.1");
         assert_eq!(shirogane_noel(""), "");
+    }
+
+    fn v6(s: &str) -> [u8; 16] {
+        match s.parse::<std::net::Ipv6Addr>() {
+            Ok(a) => a.octets(),
+            Err(e) => panic!("测试用例地址非法 {s}: {e}"),
+        }
+    }
+
+    #[test]
+    fn native_global_ipv6_classification() {
+        // 全球单播（2000::/3）且非隧道 → 算可用
+        assert!(kanae(v6("2408:8207:1234::1")));
+        assert!(kanae(v6("2606:4700::1111")));
+        assert!(kanae(v6("2a00:1450:4001::1")));
+
+        // 隧道形态：Teredo 2001:0000::/32、6to4 2002::/16 —— 连不通目标是常态，不算
+        assert!(!kanae(v6("2001:0:1234:5678::1")));
+        assert!(!kanae(v6("2002:c0a8:0101::1")));
+
+        // 非全球单播
+        assert!(!kanae(v6("fe80::1")), "链路本地不算");
+        assert!(!kanae(v6("fc00::1")), "ULA 不算");
+        assert!(!kanae(v6("::1")), "回环不算");
+        assert!(!kanae(v6("fec0::1")), "站点本地不算");
+        assert!(!kanae(v6("ff02::1")), "组播不算");
+    }
+
+    #[test]
+    fn ipv6_verdict_maps_to_status() {
+        // 无原生 v6 地址：纯 IPv4 环境是正常状态，不该报问题
+        let (st, detail, hint) = ryushen(&[], None);
+        assert_eq!(st, status::INFO);
+        assert!(detail[0].contains("纯 IPv4"));
+        assert!(hint.is_none());
+
+        // 有地址但目标没有 v6 记录：不做连通性断言
+        let one = vec!["2408:8207::1".parse().expect("合法地址")];
+        let (st, detail, _) = ryushen(&one, None);
+        assert_eq!(st, status::INFO);
+        assert!(detail[0].contains("1 个"));
+
+        // 有地址且连得通
+        let (st, detail, hint) = ryushen(&one, Some(Ok(12.0)));
+        assert_eq!(st, status::OK);
+        assert!(detail[1].contains("可达"));
+        assert!(hint.is_none());
+
+        // 有地址但连不通 = IPv6 黑洞
+        let (st, detail, hint) = ryushen(&one, Some(Err("timeout".into())));
+        assert_eq!(st, status::WARN);
+        assert!(detail[1].contains("不可达"));
+        assert!(hint.expect("应给出建议").contains("IPv6 黑洞"));
+        // 地址属于可定位信息，不能出现在报告里
+        let blob = detail.join("\n");
+        assert!(!blob.contains("2408:8207"), "不得回显地址内容: {blob}");
+    }
+
+    #[test]
+    fn budget_connect_rejects_empty_target_list() {
+        // 地址列表为空时直接失败，不假装成功（否则"没有 v6 记录"会被算成"连通")
+        let err = dola(&[], Duration::from_secs(1)).expect_err("空列表应报错");
+        assert!(err.contains("DNS 未返回地址"));
     }
 }

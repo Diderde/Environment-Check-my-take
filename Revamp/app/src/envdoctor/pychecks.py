@@ -60,8 +60,14 @@ def _spade_echo(raw: bytes | None) -> str:
 
 
 def tsukino_mito(id_: str) -> str:
-    """由检查项 id 推导类别：`env.codepage` → `env`；无点号则视为 python 类。"""
-    return id_.split(".", 1)[0] if "." in id_ else PYTHON_CATEGORY
+    """由检查项 id 推导类别：`env.codepage` → `env`；无点号则视为 python 类。
+
+    `self.*` 是"诊断工具自检"的命名空间，不是报告类别：可用类别由展示层的 CATEGORIES
+    固定，自检项归属 python。若让它自成 `self` 类别，该项会跑完却不出现在 CLI/TUI/GUI
+    的任何分组里（那是"静默丢失"，比多一个前缀糟得多）。
+    """
+    head = id_.split(".", 1)[0] if "." in id_ else PYTHON_CATEGORY
+    return PYTHON_CATEGORY if head == "self" else head
 
 
 def regis_altare(text: str) -> str:
@@ -959,6 +965,604 @@ def gilzaren_iii(_cfg: dict) -> dict:
                        "可在组策略或注册表开启后重开终端")
 
 
+# ---------------------------------------------------------------- 完整性与生态陷阱（D3）
+#
+# 这一批的共同点：结论必须"可行动"，且**取数与判定分离**——判定写成纯函数或用可注入参数，
+# I/O 走模块级可 mock 的调用，因此单测不依赖宿主环境（本机装没装 Java 都不影响结论）。
+
+_PTH_MAX_BYTES = 64 * 1024
+_SHADOW_MAX_DIRS = 8
+_TEMP_PATH_MAX = 150
+
+# 与标准库/常用库同名的"影子模块"是"莫名 ImportError"的头号根因。标准库名单取自
+# sys.stdlib_module_names，这里只补第三方常用顶层模块（它们同样会被 CWD 里的同名文件抢走）。
+_SHADOW_LIBS = frozenset({
+    "numpy", "pandas", "requests", "flask", "django", "fastapi", "cv2", "sklearn",
+    "PIL", "torch", "pytest", "yaml", "dotenv", "setuptools", "pip", "wheel",
+    "psycopg2", "pymysql", "redis", "pymongo", "matplotlib", "scipy", "httpx",
+})
+
+
+def uzuki_kou(text: str, exists=None) -> dict:
+    """纯函数：解析 pyvenv.cfg，并核对基解释器是否仍然存在。
+
+    `exists` 可注入，判定因此不依赖真实文件系统。返回的 `alive` 是仍然存在的候选基解释器
+    —— 空列表就是"僵尸 venv"（创建它的基 Python 已被删除或升级到别的目录）。
+    """
+    exists = exists or os.path.exists
+    cfg: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        cfg[key.strip().lower()] = value.strip()
+    home = cfg.get("home", "")
+    explicit = cfg.get("base-executable", "") or cfg.get("executable", "")
+    candidates: list[str] = []
+    if explicit:
+        candidates.append(explicit)
+    if home:
+        # venv 的 home 是"装解释器的目录"：Windows 下里面是 python.exe，POSIX 下是 python3
+        candidates += [str(Path(home) / n)
+                       for n in ("python.exe", "python3.exe", "python3", "python")]
+    return {
+        "version": cfg.get("version", "") or cfg.get("version_info", ""),
+        "home": home,
+        "candidates": candidates,
+        "alive": [c for c in candidates if exists(c)],
+    }
+
+
+def yashiro_kizuku(_cfg: dict) -> dict:
+    """python.venv_integrity：venv 的基解释器是否还在（基 Python 被删/升级后的僵尸环境）。"""
+    id_, title = "python.venv_integrity", "虚拟环境完整性"
+    in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+    cfg_path = Path(sys.prefix) / "pyvenv.cfg"
+    if not cfg_path.is_file():
+        reason = "当前不是 venv" if not in_venv else "未找到 pyvenv.cfg（conda 等非 venv 形态）"
+        return _doris(id_, title, "skip", [reason])
+    try:
+        text = _spade_echo(cfg_path.read_bytes())
+    except OSError as e:
+        return _doris(id_, title, "skip", [f"读取 pyvenv.cfg 失败（{type(e).__name__}）"])
+    info = uzuki_kou(text)
+    detail = [f"环境: {sys.prefix}"]
+    if info["version"]:
+        detail.append(f"创建时基版本: {info['version']}")
+    if not info["candidates"]:
+        return _doris(id_, title, "info",
+                      detail + ["pyvenv.cfg 未记录 home/base-executable，无从核对基解释器"])
+    if info["alive"]:
+        return _doris(id_, title, "ok", detail + [f"基解释器仍在: {info['alive'][0]}"])
+    return _doris(
+        id_, title, "warn",
+        detail + [f"基解释器已缺失（{len(info['candidates'])} 个候选路径均不存在）"],
+        hint="僵尸 venv：创建它的基 Python 已被删除或升级到别的目录，继续用它装包会报路径错乱的错误；"
+             "建议重建环境（删掉现有 venv 后重新 python -m venv .venv）",
+    )
+
+
+def kuroi_shiba(extra=()) -> frozenset[str]:
+    """标准库 + 常用库里"放在 sys.path 前面就会真的抢走导入"的顶层模块名。
+
+    排除两类：内置模块（`sys.builtin_module_names`，C 层实现，路径上的同名文件无效）与
+    冻结模块（`os`/`site`/`abc` 等，FrozenImporter 排在 PathFinder 之前）。
+    不排除的话，项目里一个完全无害的 `os.py` 就会被报成问题——这类检查宁可少报也不能误报。
+    """
+    names = set(getattr(sys, "stdlib_module_names", frozenset())) | set(_SHADOW_LIBS) | set(extra)
+    names -= set(sys.builtin_module_names)
+    try:
+        from importlib.machinery import FrozenImporter
+    except ImportError:  # pragma: no cover —— 极简解释器上可能不可用，此时退化为不排除
+        return frozenset(n for n in names if n.isidentifier())
+    out: set[str] = set()
+    for name in names:
+        if not name.isidentifier():
+            continue
+        try:
+            if FrozenImporter.find_spec(name, None) is not None:
+                continue
+        except Exception:  # noqa: BLE001 —— 探测失败只影响"多报/少报"，不该中断检查
+            pass
+        out.add(name)
+    return frozenset(out)
+
+
+def nakao_azuma(entries, names) -> list[str]:
+    """纯函数：从目录条目名里挑出与标准库/常用库同名的模块。
+
+    后缀为 `.py` 时去掉后缀再比对（`json.py` 命中 `json`）；包目录按目录名比对。
+    """
+    hits = []
+    for entry in entries:
+        if not entry:
+            continue
+        stem = entry[:-3] if entry.endswith(".py") else entry
+        if stem in names:
+            hits.append(entry)
+    return sorted(set(hits))
+
+
+def umiyashano_kami(_cfg: dict) -> dict:
+    """python.shadowing：当前工作目录与 PYTHONPATH 里是否有"影子模块"。
+
+    只看顶层名：`sys.path` 上排在前面的同名 .py / 包会把标准库或已装库整个换掉，
+    现象通常是"昨天还能跑、今天 ImportError"或"属性凭空消失"。
+    """
+    id_, title = "python.shadowing", "模块遮蔽"
+    names = kuroi_shiba()
+    dirs: list[Path] = []
+    try:
+        dirs.append(Path.cwd())
+    except OSError:
+        pass
+    for item in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        item = item.strip().strip('"')
+        if item:
+            dirs.append(Path(item))
+    uniq: list[Path] = []
+    seen: set[str] = set()
+    for d in dirs:
+        key = str(d).rstrip("\\/").lower()
+        if key in seen or not d.is_dir():
+            continue
+        seen.add(key)
+        uniq.append(d)
+    uniq = uniq[:_SHADOW_MAX_DIRS]
+    hits: list[str] = []
+    scanned = 0
+    truncated = False
+    deadline = time.perf_counter() + _WALK_MAX_SECONDS
+    for d in uniq:
+        plausible: list[str] = []
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    scanned += 1
+                    if scanned > _WALK_MAX_FILES or time.perf_counter() > deadline:
+                        truncated = True
+                        break
+                    stem = e.name[:-3] if e.name.endswith(".py") else e.name
+                    if stem not in names:
+                        continue
+                    if not e.name.endswith(".py"):
+                        # 目录只有是包（含 __init__.py）才会遮蔽导入；普通同名目录无害
+                        try:
+                            if not (Path(e.path) / "__init__.py").is_file():
+                                continue
+                        except OSError:
+                            continue
+                    plausible.append(e.name)
+        except OSError:
+            continue
+        hits += [f"{h}（{d}）" for h in nakao_azuma(plausible, names)]
+    tail = "（已达扫描上限）" if truncated else ""
+    detail = [f"已扫描 {len(uniq)} 个目录（当前工作目录 + PYTHONPATH），{scanned} 个条目{tail}"]
+    if hits:
+        detail.append(f"与标准库/常用库同名的模块 {len(hits)} 个:")
+        detail += [f"  {h}" for h in hits[:6]]
+        if len(hits) > 6:
+            detail.append(f"  …另有 {len(hits) - 6} 个未列出")
+        return _doris(
+            id_, title, "warn", detail,
+            hint="sys.path 上排在前面的同名模块会顶掉标准库或已装库，表现为莫名的 ImportError 或"
+                 "“属性不见了”；给项目文件改名（或把代码收进包目录）即可",
+        )
+    return _doris(id_, title, "ok", detail + ["未发现影子模块"])
+
+
+def hassaku_yuzu(text: str) -> dict:
+    """纯函数：统计 `.pth` 里的路径条目与可执行语句条数。
+
+    `.pth` 每行的正常语义是"追加一个路径"，但以 `import ` / `exec` 开头的行会被 site.py
+    直接执行（历史遗留的可执行钩子）。只回条数与关键字，**不回显整行**——那些行往往含内网路径。
+    """
+    body = [l.strip() for l in text.splitlines()]
+    body = [l for l in body if l and not l.startswith("#")]
+    executable = [l for l in body if re.match(r"(import|exec)[\s(]", l)]
+    return {"paths": len(body), "executable": len(executable)}
+
+
+def izumo_kasumi(_cfg: dict) -> dict:
+    """python.pth_files：site-packages 顶层 `.pth` 的数量与可执行钩子。"""
+    id_, title = "python.pth_files", ".pth 路径注入"
+    try:
+        import sysconfig
+        purelib = Path(sysconfig.get_paths().get("purelib") or "")
+    except Exception:  # noqa: BLE001
+        purelib = Path()
+    if not purelib.is_dir():
+        return _doris(id_, title, "skip", ["未找到 site-packages"])
+    pths: list[Path] = []
+    try:
+        with os.scandir(purelib) as it:
+            for e in it:
+                if e.name.endswith(".pth") and e.is_file(follow_symlinks=False):
+                    pths.append(Path(e.path))
+    except OSError as e:
+        return _doris(id_, title, "skip", [f"枚举 site-packages 失败（{type(e).__name__}）"])
+    if not pths:
+        return _doris(id_, title, "info", [f"site-packages: {purelib}", "顶层没有 .pth 文件"])
+    paths = exec_files = 0
+    for p in sorted(pths):
+        try:
+            raw = p.read_bytes()[:_PTH_MAX_BYTES]
+        except OSError:
+            continue
+        stat = hassaku_yuzu(_spade_echo(raw))
+        paths += stat["paths"]
+        if stat["executable"]:
+            exec_files += 1
+    detail = [f"site-packages: {purelib}",
+              f".pth 文件 {len(pths)} 个 / 路径条目 {paths} 条"]
+    if exec_files:
+        detail.append(f"含可执行语句的 .pth: {exec_files} 个（语句内容不回显）")
+        return _doris(
+            id_, title, "warn", detail,
+            hint=".pth 里的 import/exec 行会在每次启动解释器时执行（site.py 行为）：会拖慢启动，"
+                 "也可能在导入期埋下副作用；来源不明时应打开对应 .pth 确认内容",
+        )
+    detail.append("全部为纯路径注入")
+    return _doris(id_, title, "info", detail)
+
+
+def azuchi_momo(text: str, returncode: int = 0) -> dict:
+    """纯函数：把 `pip check` 的输出压成"首条冲突 + 总条数"。
+
+    冲突多时输出会很长（每个冲突一行），报告里只放首行，避免 detail 被撑爆。
+    """
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    body = [l for l in lines if not l.lower().startswith(("warning:", "notice:", "deprecationwarning"))]
+    return {
+        "conflicts": len(body) if returncode else 0,
+        "head": body[0] if body else "",
+    }
+
+
+def harusaki_air(cfg: dict) -> dict:
+    """python.pip_check：已装包之间的依赖冲突（`pip check`）。
+
+    自带预算：包多的环境要跑十几秒，但也不能无限等——超时记 skip（不是"没有冲突"）。
+    """
+    id_, title = "python.pip_check", "依赖冲突"
+    budget = int(cfg.get("timeout_secs", 30) or 30)
+    timeout = min(max(budget, 30), 60)
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "check"],
+                           capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return _doris(id_, title, "skip", [f"pip check 超时（>{timeout}s）"],
+                      hint="环境很大或磁盘慢时会超时；可单独跑 python -m pip check 复核")
+    except OSError as e:
+        return _doris(id_, title, "skip", [f"无法执行 pip check（{type(e).__name__}）"])
+    if r.returncode == 0:
+        return _doris(id_, title, "ok", ["未发现依赖冲突"])
+    info = azuchi_momo(_spade_echo(r.stdout) or _spade_echo(r.stderr), r.returncode)
+    if not info["head"]:
+        return _doris(id_, title, "skip", ["pip check 返回非零但没有可解析的输出"])
+    return _doris(
+        id_, title, "warn",
+        [f"冲突 {info['conflicts']} 条", f"首条: {info['head']}"],
+        hint="按提示逐个修：pip install -U <包名>，或按 requirements.txt 重装一遍；"
+             "冲突不会挡住解释器启动，但会让某些库在运行时才报错",
+    )
+
+
+def kanda_shoichi(root: int, path: str, name: str | None = None) -> bool:
+    """只读探测：注册表键（或键下的某个值）是否存在。
+
+    "不存在"是**正常结果**而不是错误，所以单独做一个布尔探针——`fumino_tamaki` 会抛
+    OSError，调用方就得为"没装/没重启"写异常分支，容易把正常状态写成失败。
+    """
+    import winreg
+    flags = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0)
+    try:
+        with winreg.OpenKey(root, path, 0, flags) as k:
+            if name is None:
+                return True
+            winreg.QueryValueEx(k, name)
+            return True
+    except OSError:
+        return False
+
+
+# (说明, 注册表路径, 值名/None 表示"看这个键在不在")
+_REBOOT_PROBES: tuple[tuple[str, str, str | None], ...] = (
+    ("待重命名的文件（安装器/驱动遗留）",
+     r"SYSTEM\CurrentControlSet\Control\Session Manager", "PendingFileRenameOperations"),
+    ("Windows 更新待重启",
+     r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired", None),
+    ("组件服务(CBS) 待重启",
+     r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending", None),
+)
+
+
+def amemori_sayo(_cfg: dict) -> dict:
+    """env.reboot_pending：装完更新/驱动之后是否还没重启。
+
+    三处标记都是"只读查询"：任一存在就说明系统处于半完成状态——安装程序会因为目标文件
+    被占用而失败，编译工具链也可能报找不到刚更新的 DLL。
+    """
+    id_, title = "env.reboot_pending", "待重启状态"
+    if sys.platform != "win32":
+        return _doris(id_, title, "skip", ["仅 Windows"])
+    import winreg
+    hits = [label for label, path, name in _REBOOT_PROBES
+            if kanda_shoichi(winreg.HKEY_LOCAL_MACHINE, path, name)]
+    if not hits:
+        return _doris(id_, title, "ok", ["三处待重启标记均不存在"])
+    return _doris(
+        id_, title, "warn",
+        [f"命中 {len(hits)} 项:"] + [f"  {h}" for h in hits],
+        hint="系统更新/驱动装完还没重启：安装程序会因文件被占用而失败，工具链也可能找不到刚更新的组件；"
+             "建议先重启一次再继续搭建环境",
+    )
+
+
+def takamiya_rion(temp: str, tmp: str, exists: bool, writable: bool,
+                  limit: int = _TEMP_PATH_MAX) -> tuple[str, list[str], str | None]:
+    """纯函数：TEMP/TMP 的取值与探针结果 → 结论（不碰系统，便于离线测试）。"""
+    chosen = temp or tmp
+    detail = [f"TEMP: {temp or '未设置'}", f"TMP: {tmp or '未设置'}"]
+    if not chosen:
+        return ("fail", detail,
+                "TEMP/TMP 均未设置：构建工具与解包程序找不到临时目录会直接报错；设置后需重开终端")
+    flags = []
+    if not chosen.isascii():
+        flags.append("含非 ASCII 字符")
+    if len(chosen) > limit:
+        flags.append(f"过长（{len(chosen)} > {limit} 字符）")
+    if not exists:
+        return ("fail", detail + ["目录不存在"],
+                "TEMP/TMP 指向的目录不存在：构建与解包会失败；把它指回可写目录")
+    if not writable:
+        return ("fail", detail + ["写入探针失败"],
+                "临时目录不可写：构建与解包会失败；检查目录 ACL，或确认磁盘没满")
+    if flags:
+        return ("warn", detail + ["；".join(flags)],
+                "临时路径里的非 ASCII / 超长会踩到一批老工具（旧 MSVC/nmake、部分包的编译脚本）"
+                "按 ANSI 代码页处理路径的缺陷；建议把 TEMP 指到纯 ASCII 的短路径（如 C:\\Temp）")
+    return "ok", detail, None
+
+
+def asuka_hina(_cfg: dict) -> dict:
+    """env.temp_path：TEMP/TMP 是否可用、是否踩到非 ASCII / 超长路径。"""
+    id_, title = "env.temp_path", "临时目录路径"
+    if sys.platform != "win32":
+        return _doris(id_, title, "skip", ["仅 Windows（其他平台的临时目录约定不同）"])
+    temp = os.environ.get("TEMP", "")
+    tmp = os.environ.get("TMP", "")
+    chosen = temp or tmp
+    exists = bool(chosen) and Path(chosen).is_dir()
+    writable = False
+    if exists:
+        probe = Path(chosen) / f".envdoctor_temppath_{os.getpid()}"
+        try:
+            probe.write_bytes(b"x")
+            writable = True
+        except OSError:
+            writable = False
+        finally:
+            try:
+                probe.unlink()
+            except OSError:
+                pass
+    status_, detail, hint = takamiya_rion(temp, tmp, exists, writable)
+    return _doris(id_, title, status_, detail, hint=hint)
+
+
+_VCREDIST_KEY = r"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+_VCREDIST_FIELDS = ("Installed", "Version", "Major", "Minor", "Bld", "Rbld")
+
+
+def maimoto_keisuke(values: dict) -> str:
+    """纯函数：把 vcredist 的注册表值拼成可读版本号。
+
+    注册表里的 `Version` 通常已是现成字符串（`v14.40.33810.00`），但并非所有版本都写；
+    缺失时按 Major/Minor/Bld/Rbld 四个分量拼，拼不出来就返回空串（调用方只报"已安装"）。
+    """
+    version = str(values.get("Version", "") or "").strip()
+    if version:
+        return version if version.startswith("v") else f"v{version}"
+    parts = [values.get(k) for k in ("Major", "Minor", "Bld", "Rbld")]
+    if any(not isinstance(p, int) for p in parts):
+        return ""
+    return "v{}.{}.{}.{}".format(*parts)
+
+
+def debidebi_debiru() -> dict:
+    """只读探测：VC++ 运行库（x64）的注册表状态；返回 `{}` 表示该键整个不存在。
+
+    复用 `fumino_tamaki`（它显式带 `KEY_WOW64_64KEY`）：少了这个标志，32 位解释器只能看到
+    WOW6432Node 视图，64 位运行库会被整个漏掉。
+    """
+    import winreg
+    out: dict = {}
+    for field in _VCREDIST_FIELDS:
+        try:
+            out[field] = fumino_tamaki(winreg.HKEY_LOCAL_MACHINE, _VCREDIST_KEY, field)
+        except OSError:
+            continue
+    return out
+
+
+def rindou_mikoto(_cfg: dict) -> dict:
+    """env.vcredist：VC++ 运行库是否已装（缺 VCRUNTIME140.dll 的经典报错）。"""
+    id_, title = "env.vcredist", "VC++ 运行库"
+    if sys.platform != "win32":
+        return _doris(id_, title, "skip", ["仅 Windows"])
+    values = debidebi_debiru()
+    detail: list[str] = []
+    if values:
+        version = maimoto_keisuke(values)
+        detail.append("注册表记录: " + ("已安装" if values.get("Installed") else "未标记已安装")
+                      + (f" {version}" if version else ""))
+    else:
+        detail.append("注册表未找到 x64 运行库记录")
+    dll = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "vcruntime140.dll"
+    has_dll = dll.is_file()
+    detail.append(f"System32\\vcruntime140.dll: {'存在' if has_dll else '不存在'}")
+    if values.get("Installed") or has_dll:
+        return _doris(id_, title, "ok", detail)
+    return _doris(
+        id_, title, "warn", detail,
+        hint="很多工具（Python 扩展、Node 原生模块、C++ 命令行工具）会报缺少 VCRUNTIME140.dll；"
+             "装一次 Microsoft Visual C++ 2015-2022 可再发行组件包（x64）即可",
+    )
+
+
+def joe_rikiichi(java_home: str, on_path: str, home_java: str,
+                 resolve=None) -> tuple[str, list[str], str | None]:
+    """纯函数：比对 JAVA_HOME 下的 java 与 PATH 上的 java 是否同一个文件。
+
+    `resolve` 可注入（默认 `Path.resolve`），所以判定不依赖真实文件系统。
+    """
+    resolve = resolve or (lambda p: str(Path(p).resolve()))
+    if not java_home:
+        return "info", ["JAVA_HOME 未设置（不装 Java 时属正常）"], None
+    if not home_java:
+        return ("info", [f"JAVA_HOME = {java_home}",
+                         "该目录下没有 bin/java（可能是 JRE 布局，或路径写错）"], None)
+    if not on_path:
+        return ("info", [f"JAVA_HOME = {java_home}",
+                         "PATH 上没有 java（只设了 JAVA_HOME，命令行调不到）"], None)
+    here, there = resolve(home_java), resolve(on_path)
+    if here == there:
+        return "ok", [f"JAVA_HOME = {java_home}", f"与 PATH 上的 java 是同一个: {here}"], None
+    return ("warn", [f"JAVA_HOME = {java_home}", f"JAVA_HOME 下: {here}", f"PATH 上: {there}"],
+            "两处不是同一个 java：构建工具（Maven/Gradle/IDE）按 JAVA_HOME 走、命令行按 PATH 走，"
+            "会出现“编译用 17、运行用 8”这类难查的版本错配；把 PATH 上的 java 指到 JAVA_HOME\\bin 即可")
+
+
+def machita_chima(_cfg: dict) -> dict:
+    """toolchains.java_home：JAVA_HOME 与 PATH 上的 java 是否同一个。"""
+    id_, title = "toolchains.java_home", "JAVA_HOME 一致性"
+    java_home = os.environ.get("JAVA_HOME", "").strip().strip('"')
+    on_path = shutil.which("java") or ""
+    home_java = ""
+    if java_home:
+        for name in ("java.exe", "java"):
+            cand = Path(java_home) / "bin" / name
+            if cand.is_file():
+                home_java = str(cand)
+                break
+    status_, detail, hint = joe_rikiichi(java_home, on_path, home_java)
+    return _doris(id_, title, status_, detail, hint=hint)
+
+
+# 只取关键键：绝不用 `^(http|https|core)\.` 这种宽匹配——`http.<url>.extraheader` 里
+# 装的是 Authorization 令牌，一旦被取出来就有落进报告的风险。
+_GIT_CONFIG_KEYS = (
+    r"http\.proxy", r"https\.proxy", r"http\.sslbackend",
+    r"http\..*\.schannelcheckrevoke", r"core\.longpaths", r"core\.autocrlf",
+)
+
+
+def sakura_ritsuki(text: str) -> dict:
+    """纯函数：解析 `git config --get-regexp` 输出里关心的几项，代理值走 `kobo_kanaeru` 脱敏。
+
+    键与值都进不了报告的只有两类：子段含主机名的（只报条数）与代理 URL（凭据打码）。
+    """
+    proxies: list[str] = []
+    revoked = 0
+    scalars: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        key = parts[0].lower()
+        value = parts[1].strip() if len(parts) > 1 else ""
+        if key in ("http.proxy", "https.proxy"):
+            proxies.append(f"{key} = {kobo_kanaeru(value)}")
+        elif key.endswith(".schannelcheckrevoke"):
+            # 子段是主机名/URL，可能含内网域名：只计数，不回显
+            if value.lower() == "false":
+                revoked += 1
+        elif key in ("http.sslbackend", "core.longpaths", "core.autocrlf"):
+            scalars[key] = value
+    return {"proxies": proxies, "revoked": revoked, "scalars": scalars}
+
+
+def belmond_banderas(_cfg: dict) -> dict:
+    """toolchains.git_config：git 的代理/证书/换行关键配置。
+
+    单次调用取全部键（分次调用会明显变慢）；**关键项缺失不算问题**——默认配置本来就没有这些键。
+    """
+    id_, title = "toolchains.git_config", "Git 关键配置"
+    pattern = "^(" + "|".join(_GIT_CONFIG_KEYS) + ")$"
+    try:
+        r = subprocess.run(["git", "config", "--get-regexp", pattern],
+                           capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return _doris(id_, title, "skip", [f"无法执行 git（{type(e).__name__}）"])
+    info = sakura_ritsuki(_spade_echo(r.stdout))
+    detail: list[str] = list(info["proxies"]) or ["未配置 http.proxy / https.proxy"]
+    if info["revoked"]:
+        detail.append(f"已关闭证书吊销检查的条目: {info['revoked']} 个（子段含主机名，不回显）")
+        detail.append("吊销检查常被中间人代理/加速器要求关闭，属该场景下的预期配置")
+    for key in ("http.sslbackend", "core.longpaths", "core.autocrlf"):
+        if key in info["scalars"]:
+            detail.append(f"{key} = {info['scalars'][key]}")
+    return _doris(id_, title, "info", detail)
+
+
+_EXPECTED_REPORT_VERSION = 1
+# 用一个不存在的类别跑一次空报告：只读契约字段，不触发任何真实检查（毫秒级）
+_ABI_PROBE_CATEGORY = "__envdoctor_abi_probe__"
+
+
+def yaguruma_rine(core_version: str, has_list_checks: bool,
+                  report_version) -> tuple[str, list[str], str | None]:
+    """纯函数：核心自检的判定（版本可解析、清单出口存在、报告契约版本符合预期）。"""
+    detail = [
+        f"核心版本: {core_version or '未知'}",
+        f"检查项清单出口: {'有' if has_list_checks else '无'}",
+        f"报告契约版本: {report_version if report_version is not None else '未取到'}"
+        f"（预期 {_EXPECTED_REPORT_VERSION}）",
+    ]
+    problems = []
+    if not re.fullmatch(r"\d+\.\d+\.\d+", core_version or ""):
+        problems.append("核心版本号无法解析")
+    if not has_list_checks:
+        problems.append("核心没有 envdoctor_list_checks 出口（版本过旧，或不是本项目的核心）")
+    if report_version is not None and report_version != _EXPECTED_REPORT_VERSION:
+        problems.append(f"报告契约版本不是 {_EXPECTED_REPORT_VERSION}")
+    if problems:
+        return ("warn", detail + ["问题: " + "；".join(problems)],
+                "契约不一致时展示层可能读不到字段或误读状态；请确认 Python 包与核心 DLL 来自同一次构建"
+                "（cd core && cargo build --release）")
+    return "ok", detail, None
+
+
+def yumeoi_kakeru(_cfg: dict) -> dict:
+    """self.abi：Python 包与 Rust 核心的 ABI/报告契约是否对得上。
+
+    核心缺失时记 skip 而不是 fail：CLI 在启动阶段已经给出"请先构建核心"的明确报错，
+    这里再报一次只会让报告多一个假问题。
+    """
+    id_, title = "self.abi", "核心 ABI 自检"
+    try:
+        from envdoctor.binding import irys
+        core = irys()
+    except Exception as e:  # noqa: BLE001 —— 加载失败一律降级，不让检查本身变成故障源
+        return _doris(id_, title, "skip", [f"核心不可用（{type(e).__name__}）"])
+    try:
+        version = core.takanashi_kiara()
+    except Exception as e:  # noqa: BLE001
+        return _doris(id_, title, "skip", [f"读取核心版本失败（{type(e).__name__}）"])
+    report_version = None
+    try:
+        probe = core.gawr_gura({"categories": [_ABI_PROBE_CATEGORY], "timeout_secs": 5})
+        report_version = probe.get("report_version")
+    except Exception:  # noqa: BLE001
+        report_version = None
+    status_, detail, hint = yaguruma_rine(version, bool(getattr(core, "has_list_checks", False)),
+                                         report_version)
+    return _doris(id_, title, status_, detail, hint=hint)
+
+
 # ---------------------------------------------------------------- 注册与运行
 
 _PY_CHECKS = [
@@ -989,6 +1593,16 @@ _PY_CHECKS = [
     ("network.hosts", "hosts 解析", josuiji_shinri),
     ("toolchains.git_identity", "Git 身份", kenmochi_toya),
     ("toolchains.ssh_keys", "SSH 密钥", fushimi_gaku),
+    ("python.venv_integrity", "虚拟环境完整性", yashiro_kizuku),
+    ("python.shadowing", "模块遮蔽", umiyashano_kami),
+    ("python.pth_files", ".pth 路径注入", izumo_kasumi),
+    ("python.pip_check", "依赖冲突", harusaki_air),
+    ("env.reboot_pending", "待重启状态", amemori_sayo),
+    ("env.temp_path", "临时目录路径", asuka_hina),
+    ("env.vcredist", "VC++ 运行库", rindou_mikoto),
+    ("toolchains.java_home", "JAVA_HOME 一致性", machita_chima),
+    ("toolchains.git_config", "Git 关键配置", belmond_banderas),
+    ("self.abi", "核心 ABI 自检", yumeoi_kakeru),
 ]
 
 
