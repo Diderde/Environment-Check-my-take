@@ -13,6 +13,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import urllib.error
 from pathlib import Path
@@ -1191,6 +1192,366 @@ class ReportContractTest(unittest.TestCase):
         known = set(cli._STATUS_ICON) | set(cli._STATUS_ASCII) | set(cli._COLOR)
         for r in rows:
             self.assertIn(r["status"], known, r["id"])
+
+
+class ProjectsChecksTest(unittest.TestCase):
+    """projects 批：工作区巡检。仓库布局用真实目录 + 假 .git 造，git 调用一律 mock。"""
+
+    def setUp(self):
+        pychecks._PROJECTS_CACHE.clear()
+
+    @staticmethod
+    def _repo(base, name, *, branch="main", remotes=1, shallow=False, lock_age=None,
+              operation=None, manifests=(), detached=False):
+        repo = Path(base) / name
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "HEAD").write_text(
+            "a" * 40 + "\n" if detached else f"ref: refs/heads/{branch}\n", encoding="utf-8")
+        (repo / ".git" / "config").write_text(
+            "".join(f'[remote "r{i}"]\n\turl = https://example.invalid/x\n' for i in range(remotes)),
+            encoding="utf-8")
+        if shallow:
+            (repo / ".git" / "shallow").write_text("", encoding="utf-8")
+        if operation:
+            (repo / ".git" / operation).write_text("", encoding="utf-8")
+        if lock_age is not None:
+            lock = repo / ".git" / "index.lock"
+            lock.write_text("", encoding="utf-8")
+            stamp = time.time() - lock_age
+            os.utime(lock, (stamp, stamp))
+        for m in manifests:
+            (repo / m).write_text("", encoding="utf-8")
+        return repo
+
+    # ---- 发现
+    def test_discovery_finds_repos_and_skips_noise(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(tmp, "one")
+            (Path(tmp) / "group" / "two").mkdir(parents=True)
+            (Path(tmp) / "group" / "two" / ".git").mkdir()
+            deep_pkg = Path(tmp) / "node_modules" / "pkg"
+            deep_pkg.mkdir(parents=True)
+            (deep_pkg / ".git").mkdir()                      # 依赖缓存里的不算
+            too_deep = Path(tmp) / "a" / "b" / "c" / "d" / "e"
+            too_deep.mkdir(parents=True)
+            (too_deep / ".git").mkdir()                      # 超过深度上限
+            r = pychecks.tsukimi_shizuku([str(tmp)], budget=10.0)
+            self.assertEqual(sorted(p.name for p in r["repos"]), ["one", "two"])
+            self.assertFalse(r["truncated"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_discovery_dedupes_overlapping_roots(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(tmp, "group", manifests=())
+            nested = self._repo(tmp, "inner")
+            r = pychecks.tsukimi_shizuku([str(tmp), str(tmp), str(nested.parent)], budget=10.0)
+            self.assertEqual(len(r["repos"]), 2, "重叠的扫描根不能把同一个仓库数两遍")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_discovery_respects_budget_and_missing_root(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(tmp, "one")
+            r = pychecks.tsukimi_shizuku([str(tmp), r"Z:\envdoctor-no-such-root"], budget=0.0)
+            self.assertTrue(r["truncated"], "预算为 0 时必须截断而不是硬跑")
+            self.assertEqual(r["repos"], [])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_discovery_order_is_stable_for_numbering(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            for name in ("zeta", "alpha", "mid"):
+                self._repo(tmp, name)
+            first = [p.name for p in pychecks.tsukimi_shizuku([str(tmp)], budget=10.0)["repos"]]
+            second = [p.name for p in pychecks.tsukimi_shizuku([str(tmp)], budget=10.0)["repos"]]
+            self.assertEqual(first, ["alpha", "mid", "zeta"], "编号必须可复现（根内按路径字典序）")
+            self.assertEqual(first, second)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- 单仓库事实
+    def test_repo_facts_read_directly_from_git_dir(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            repo = self._repo(tmp, "a", branch="dev", remotes=2, shallow=True,
+                              operation="MERGE_HEAD", manifests=("requirements.txt", "notes.md"))
+            fake = subprocess.CompletedProcess([], 0, b"M  x\0?? y\0", b"")
+            with mock.patch.object(pychecks.subprocess, "run", return_value=fake) as m:
+                f = pychecks.achikita_chinami(repo)
+            self.assertEqual(f["branch"], "dev")
+            self.assertEqual(f["remotes"], 2)
+            self.assertTrue(f["shallow"])
+            self.assertEqual(f["operation"], "merge")
+            self.assertEqual(f["dirty"], 2)
+            self.assertEqual(f["manifests"], ["requirements.txt"])
+            self.assertFalse(f["detached"])
+            self.assertIn("--no-optional-locks", m.call_args[0][0],
+                          "必须禁止 git status 顺带刷新 index（那是写操作）")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_repo_facts_detect_detached_head(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            repo = self._repo(tmp, "a", detached=True)
+            fake = subprocess.CompletedProcess([], 0, b"", b"")
+            with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+                f = pychecks.achikita_chinami(repo)
+            self.assertTrue(f["detached"])
+            self.assertEqual(f["branch"], "")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_repo_facts_follow_gitfile_for_worktrees(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            repo = Path(tmp) / "wt"
+            real = Path(tmp) / "real-git"
+            repo.mkdir(parents=True)
+            real.mkdir(parents=True)
+            (real / "HEAD").write_text("ref: refs/heads/wt\n", encoding="utf-8")
+            (repo / ".git").write_text(f"gitdir: {real}\n", encoding="utf-8")
+            fake = subprocess.CompletedProcess([], 0, b"", b"")
+            with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+                f = pychecks.achikita_chinami(repo)
+            self.assertEqual(f["branch"], "wt", ".git 是文件（worktree/子模块）时要跟随 gitdir")
+            self.assertEqual(f["remotes"], 0)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_repo_facts_survive_git_failure(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            repo = self._repo(tmp, "a")
+            with mock.patch.object(pychecks.subprocess, "run", side_effect=FileNotFoundError()):
+                f = pychecks.achikita_chinami(repo)
+            self.assertIsNone(f["dirty"])
+            self.assertIn("git", f["error"])
+            self.assertEqual(f["branch"], "main", "git 不可用也不能丢掉读文件得到的事实")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- 快照
+    def test_snapshot_is_memoized_and_shared(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(tmp, "one")
+            cfg = {"scan_roots": [str(tmp)]}
+            fake = subprocess.CompletedProcess([], 0, b"", b"")
+            with mock.patch.object(pychecks.subprocess, "run", return_value=fake) as m:
+                first = pychecks.naruto_kogane(cfg)
+                calls_after_first = m.call_count
+                second = pychecks.naruto_kogane(dict(cfg))
+                calls_after_second = m.call_count
+            self.assertIs(first, second, "同一组扫描根必须复用同一份快照")
+            self.assertEqual(calls_after_first, calls_after_second, "第二次不应再起 git 子进程")
+            self.assertEqual(len(first["repos"]), 1)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_snapshot_without_roots_does_no_io(self):
+        with mock.patch.object(pychecks.subprocess, "run") as m:
+            snap = pychecks.naruto_kogane({})
+        self.assertEqual(snap["roots"], [])
+        self.assertEqual(snap["repos"], [])
+        self.assertEqual(m.call_count, 0)
+
+    def test_runner_resets_snapshot_cache_between_rounds(self):
+        pychecks._PROJECTS_CACHE["key"] = ("stale",)
+        pychecks._PROJECTS_CACHE["value"] = {"roots": ["stale"]}
+        rows = pychecks.yatogami_fuma({}, categories=["projects"])
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(pychecks._PROJECTS_CACHE, {}, "每轮开跑前必须清掉上一轮的仓库快照")
+
+    # ---- 判定（纯函数）
+    def _fact(self, **kw):
+        base = {"dirty": 0, "detached": False, "remotes": 1, "shallow": False,
+                "operation": "", "lock_age": None, "error": ""}
+        base.update(kw)
+        return base
+
+    def test_health_only_warns_on_blocking_states(self):
+        self.assertEqual(pychecks.naruse_naru([self._fact()])[0], "info")
+        # 未提交改动 / 无远端 / 浅克隆都是正常工作状态
+        busy = self._fact(dirty=12, remotes=0, shallow=True)
+        status_, _, hint = pychecks.naruse_naru([busy])
+        self.assertEqual(status_, "info", "有未提交改动不该报 warn")
+        self.assertIsNone(hint)
+        # 会挡路/会丢东西的三种才报 warn
+        self.assertEqual(pychecks.naruse_naru([self._fact(detached=True)])[0], "warn")
+        status_, detail, hint = pychecks.naruse_naru([self._fact(operation="rebase")])
+        self.assertEqual(status_, "warn")
+        self.assertTrue(any("未完成的 git 操作" in d for d in detail))
+        self.assertIn("index.lock", hint)
+        # 新鲜的锁说明 git 正在跑，不是问题；超过 3 分钟才算卡住
+        self.assertEqual(pychecks.naruse_naru([self._fact(lock_age=5.0)])[0], "info")
+        self.assertEqual(pychecks.naruse_naru([self._fact(lock_age=600.0)])[0], "warn")
+
+    def test_health_reports_indices_not_paths(self):
+        _, detail, _ = pychecks.naruse_naru([self._fact(), self._fact(detached=True, dirty=3)])
+        blob = " ".join(detail)
+        self.assertIn("#2", blob)
+        self.assertNotIn(":\\", blob, "只报编号，不得出现路径")
+
+    def test_health_empty_repo_set_is_info(self):
+        status_, detail, hint = pychecks.naruse_naru([])
+        self.assertEqual(status_, "info")
+        self.assertIsNone(hint)
+        self.assertIn("未在给定扫描根下发现", detail[0])
+
+    def test_cross_project_conflicts_and_shared(self):
+        entries = [(1, "requests", "2.31.0"), (1, "numpy", ""), (1, "pytest", "8.2.0"),
+                   (2, "requests", "2.28.0"), (2, "numpy", ""), (2, "pytest", "8.2.0"),
+                   (3, "requests", "2.31.0"), (3, "torch", "")]
+        info = pychecks.warabeda_meiji(entries)
+        self.assertEqual([c[0] for c in info["conflicts"]], ["requests"])
+        self.assertEqual(info["conflicts"][0][1],
+                         [(1, "2.31.0"), (2, "2.28.0"), (3, "2.31.0")])
+        self.assertIn(("requests", 3), info["shared"])
+        self.assertIn(("pytest", 2), info["shared"])
+        self.assertNotIn(("torch", 1), info["shared"], "只有一个项目用不算共用")
+        self.assertEqual((info["total"], info["pinned"]), (8, 5))
+
+    def test_conflicts_need_differing_exact_pins(self):
+        self.assertEqual(pychecks.warabeda_meiji([(1, "x", "1.0.0"), (2, "x", "1.0.0")])["conflicts"], [])
+        self.assertEqual(pychecks.warabeda_meiji([(1, "x", ""), (2, "x", "")])["conflicts"], [],
+                         "范围约束之间是否相容要真正的求解器，这里不判")
+
+    # ---- 清单解析（纯函数）
+    def test_requirements_parser(self):
+        text = ("# comment\n"
+                "-r other.txt\n"
+                "requests==2.31.0\n"
+                "numpy>=1.26,<2\n"
+                "uvicorn[standard]==0.30.0\n"
+                "torch  # inline\n"
+                "pandas==2.*\n"
+                "https://example.invalid/x.whl\n"
+                "\n")
+        got = {p: pin for p, _s, pin in pychecks.kudo_chitose("requirements.txt", text)}
+        self.assertEqual(got["requests"], "2.31.0")
+        self.assertEqual(got["uvicorn"], "0.30.0", "带 extras 的写法也要认")
+        self.assertEqual(got["numpy"], "", "范围约束不算精确钉版本")
+        self.assertEqual(got["pandas"], "", "==2.* 不是精确版本")
+        self.assertIn("torch", got)
+        self.assertNotIn("-r", got)
+        self.assertNotIn("https://example.invalid/x.whl", got)
+
+    def test_package_json_parser(self):
+        text = json.dumps({"name": "x",
+                           "dependencies": {"react": "18.2.0", "next": "^14.0.0"},
+                           "devDependencies": {"typescript": "5.4.5"}})
+        got = {p: pin for p, _s, pin in pychecks.kudo_chitose("package.json", text)}
+        self.assertEqual(got["react"], "18.2.0")
+        self.assertEqual(got["typescript"], "5.4.5")
+        self.assertEqual(got["next"], "", "^14.0.0 是范围")
+        self.assertEqual(pychecks.kudo_chitose("package.json", "{oops"), [], "坏 JSON 不猜")
+
+    def test_go_mod_parser(self):
+        text = ("module x\n\ngo 1.22\n\nrequire (\n"
+                "\tgithub.com/gin-gonic/gin v1.9.1\n"
+                "\tgolang.org/x/text v0.14.0 // indirect\n)\n\n"
+                "require github.com/stretchr/testify v1.9.0\n")
+        got = {p: pin for p, _s, pin in pychecks.kudo_chitose("go.mod", text)}
+        self.assertEqual(got["github.com/gin-gonic/gin"], "v1.9.1")
+        self.assertEqual(got["golang.org/x/text"], "v0.14.0")
+        self.assertEqual(got["github.com/stretchr/testify"], "v1.9.0")
+
+    def test_pyproject_and_cargo_parsers(self):
+        pyproject = ('[project]\nname = "x"\n'
+                     'dependencies = ["requests==2.31.0", "numpy>=1.26"]\n'
+                     '[project.optional-dependencies]\ndev = ["pytest==8.2.0"]\n')
+        got = {p: pin for p, _s, pin in pychecks.kudo_chitose("pyproject.toml", pyproject)}
+        self.assertEqual(got["requests"], "2.31.0")
+        self.assertEqual(got["pytest"], "8.2.0")
+        self.assertEqual(got["numpy"], "")
+
+        cargo = '[dependencies]\nserde = "1.0.200"\n'
+        deps = pychecks.kudo_chitose("Cargo.toml", cargo)
+        self.assertEqual([p for p, _s, _pin in deps], ["serde"])
+        self.assertEqual(deps[0][2], "", "Cargo 的裸版本号是 caret 语义，不能当精确钉版本")
+
+    # ---- 检查本体
+    def test_projects_checks_skip_without_scan_root(self):
+        for fn in (pychecks.yuzuki_roa, pychecks.gundo_mirei, pychecks.onomachi_haruka):
+            r = fn({})
+            self.assertEqual(r["status"], "skip", fn.__name__)
+            self.assertEqual(r["category"], "projects")
+            self.assertIn("--scan-root", r["detail"][0])
+
+    def test_inventory_reports_counts_only(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(tmp, "alpha", remotes=1)
+            self._repo(tmp, "beta", remotes=0)
+            fake = subprocess.CompletedProcess([], 0, b"", b"")
+            with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+                r = pychecks.yuzuki_roa({"scan_roots": [str(tmp)]})
+            blob = json.dumps(r, ensure_ascii=False)
+            self.assertEqual(r["status"], "info")
+            self.assertIn("发现仓库 2 个", blob)
+            self.assertIn("有远端 1 个", blob)
+            self.assertNotIn("alpha", blob, "报告里不得出现项目名")
+            self.assertNotIn(str(tmp), blob, "报告里不得出现路径")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_health_check_warns_with_repo_indices(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(tmp, "alpha", detached=True)
+            fake = subprocess.CompletedProcess([], 0, b"", b"")
+            with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+                r = pychecks.gundo_mirei({"scan_roots": [str(tmp)]})
+            blob = json.dumps(r, ensure_ascii=False)
+            self.assertEqual(r["status"], "warn")
+            self.assertIn("#1", blob)
+            self.assertNotIn("alpha", blob)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_deps_check_warns_on_version_conflict(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            a = self._repo(tmp, "alpha", manifests=("requirements.txt",))
+            b = self._repo(tmp, "beta", manifests=("requirements.txt",))
+            (a / "requirements.txt").write_text("requests==2.31.0\n", encoding="utf-8")
+            (b / "requirements.txt").write_text("requests==2.28.0\n", encoding="utf-8")
+            fake = subprocess.CompletedProcess([], 0, b"", b"")
+            with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+                r = pychecks.onomachi_haruka({"scan_roots": [str(tmp)]})
+            blob = json.dumps(r, ensure_ascii=False)
+            self.assertEqual(r["status"], "warn")
+            self.assertIn("requests", blob, "依赖名是回显的（可行动信息）")
+            self.assertIn("#1=2.31.0", blob)
+            self.assertIn("#2=2.28.0", blob)
+            self.assertNotIn("alpha", blob, "项目名不回显")
+            self.assertNotIn(str(tmp), blob, "路径不回显")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_deps_check_info_when_no_manifests(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            self._repo(tmp, "alpha")
+            fake = subprocess.CompletedProcess([], 0, b"", b"")
+            with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+                r = pychecks.onomachi_haruka({"scan_roots": [str(tmp)]})
+            self.assertEqual(r["status"], "info")
+            self.assertIn("均无受支持的根清单文件", " ".join(r["detail"]))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_projects_registered_under_new_displayable_category(self):
+        defs = {d["id"]: d["category"] for d in pychecks.tsukishita_kaoru()}
+        for cid in ("projects.inventory", "projects.health", "projects.deps"):
+            self.assertEqual(defs.get(cid), "projects", cid)
+        self.assertIn("projects", cli.CATEGORIES, "新类别必须进展示层的类别表")
 
 
 if __name__ == "__main__":

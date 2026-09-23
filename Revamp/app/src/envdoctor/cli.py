@@ -19,7 +19,8 @@ from envdoctor import pychecks
 app = typer.Typer(add_completion=False, no_args_is_help=False,
                   help="全栈开发环境诊断（Rust 核心 + Python 界面层）")
 
-CATEGORIES = ["hardware", "env", "toolchains", "network", "containers", "databases", "python"]
+CATEGORIES = ["hardware", "env", "toolchains", "projects", "network",
+              "containers", "databases", "python"]
 
 # 两套图标：中文 Windows 控制台默认 cp936，emoji 与箭头/方框字符都不在其字符集内。
 # 不能只靠 --no-color —— 那个开关只管 ANSI 转义，管不了字符本身能不能编码。
@@ -222,6 +223,10 @@ def run(
         [], "--require", help="必备工具：缺失记 FAIL（可重复，也可逗号分隔）"
     ),
     net_full: bool = typer.Option(False, "--net-full", help="启用隐私外发检查（公网 IP）"),
+    scan_root: list[str] = typer.Option(
+        [], "--scan-root",
+        help="本地项目巡检的扫描根（可重复；不给则 projects.* 记 skip，不做任何扫描）",
+    ),
     timeout: int = typer.Option(
         25, "--timeout", min=1, help="整轮超时预算（秒）：单项预算 × 检查项数"
     ),
@@ -253,6 +258,18 @@ def run(
         "net_full": net_full,
         "timeout_secs": timeout,
     }
+    # 扫描根在这里落地为绝对路径并去掉不存在的项：巡检只读，路径是用户自己给的，
+    # 只作为 argv 数据传给 git（args 列表形式、不经 shell），不存在命令注入面。
+    roots: list[str] = []
+    for raw_root in scan_root:
+        p = Path(raw_root).expanduser()
+        if p.is_dir():
+            resolved = str(p.resolve())
+            if resolved not in roots:
+                roots.append(resolved)
+        else:
+            typer.secho(f"警告: --scan-root 不是已存在的目录，已忽略: {raw_root}",
+                        fg=typer.colors.YELLOW, err=True)
     if category:
         allowed = set(category)
     else:
@@ -283,7 +300,7 @@ def run(
             wanted = set(category)
             py_defs = [d for d in py_defs if d["category"] in wanted]
         py_total = len(py_defs)
-        py_cfg = {"timeout_secs": timeout}
+        py_cfg = {"timeout_secs": timeout, "scan_roots": roots}
         rust_n = len(rust_report.get("results", []))
         py_results = pychecks.yatogami_fuma(
             py_cfg,
