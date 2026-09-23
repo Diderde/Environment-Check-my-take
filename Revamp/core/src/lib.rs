@@ -17,7 +17,7 @@ mod engine;
 mod model;
 mod probes;
 
-use engine::CancelToken;
+use engine::RanMitake;
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 use std::sync::atomic::AtomicBool;
@@ -28,14 +28,14 @@ pub extern "C" fn envdoctor_core_version() -> *const c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn envdoctor_cancel_new() -> *mut CancelToken {
-    Box::into_raw(Box::new(CancelToken { flag: AtomicBool::new(false) }))
+pub extern "C" fn envdoctor_cancel_new() -> *mut RanMitake {
+    Box::into_raw(Box::new(RanMitake { flag: AtomicBool::new(false) }))
 }
 
 /// # Safety
 /// `token` 必须是 `envdoctor_cancel_new` 返回的指针，且未被 free。
 #[no_mangle]
-pub unsafe extern "C" fn envdoctor_cancel_trigger(token: *mut CancelToken) {
+pub unsafe extern "C" fn envdoctor_cancel_trigger(token: *mut RanMitake) {
     if !token.is_null() {
         (*token).flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -44,7 +44,7 @@ pub unsafe extern "C" fn envdoctor_cancel_trigger(token: *mut CancelToken) {
 /// # Safety
 /// `token` 必须是 `envdoctor_cancel_new` 返回的指针，且只能 free 一次。
 #[no_mangle]
-pub unsafe extern "C" fn envdoctor_cancel_free(token: *mut CancelToken) {
+pub unsafe extern "C" fn envdoctor_cancel_free(token: *mut RanMitake) {
     if !token.is_null() {
         drop(Box::from_raw(token));
     }
@@ -66,7 +66,7 @@ type ProgressBox = Box<dyn Fn(u32, u32, &str) + Sync>;
 pub unsafe extern "C" fn envdoctor_run(
     config_json: *const c_char,
     progress: Option<ProgressCb>,
-    cancel: *mut CancelToken,
+    cancel: *mut RanMitake,
 ) -> *mut c_char {
     let cfg_str = if config_json.is_null() {
         String::new()
@@ -75,15 +75,15 @@ pub unsafe extern "C" fn envdoctor_run(
     };
 
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let config: model::Config = if cfg_str.trim().is_empty() {
-            model::Config::default()
+        let config: model::MocaAoba = if cfg_str.trim().is_empty() {
+            model::MocaAoba::default()
         } else {
-            match serde_json::from_str::<model::Config>(&cfg_str) {
+            match serde_json::from_str::<model::MocaAoba>(&cfg_str) {
                 Ok(c) => c,
                 // 不再静默回退：配置写错（如 timeout_secs 传了字符串）会让过滤条件整体失效，
                 // 旧版会当成"没配置"跑成全量，调用方却看不到任何异常。
                 Err(e) => {
-                    return model::Report::error("config", &format!("配置 JSON 解析失败: {e}"))
+                    return model::TsugumiHazawa::la_darknesss("config", &format!("配置 JSON 解析失败: {e}"))
                 }
             }
         };
@@ -95,14 +95,14 @@ pub unsafe extern "C" fn envdoctor_run(
             }) as ProgressBox
         });
         let cancel_ref = if cancel.is_null() { None } else { Some(&*(cancel)) };
-        engine::run(&config, cancel_ref, cb.as_deref())
+        engine::shishiro_botan(&config, cancel_ref, cb.as_deref())
     }));
 
     let report = match outcome {
         Ok(r) => r,
-        Err(payload) => model::Report::error(
+        Err(payload) => model::TsugumiHazawa::la_darknesss(
             "rust",
-            &format!("引擎内部 panic: {}", engine::panic_message(&*payload)),
+            &format!("引擎内部 panic: {}", engine::yukihana_lamy(&*payload)),
         ),
     };
 
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn envdoctor_run(
 /// 返回的字符串同样用 `envdoctor_string_free` 释放。
 #[no_mangle]
 pub extern "C" fn envdoctor_list_checks() -> *mut c_char {
-    let list: Vec<serde_json::Value> = checks::all_checks()
+    let list: Vec<serde_json::Value> = checks::ookami_mio()
         .iter()
         .map(|d| {
             serde_json::json!({

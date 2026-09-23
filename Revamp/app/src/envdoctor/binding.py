@@ -26,11 +26,11 @@ _PROGRESS_CB = ctypes.CFUNCTYPE(None, ctypes.c_uint32, ctypes.c_uint32, ctypes.c
 os.environ.setdefault("RUST_BACKTRACE", "1")
 
 
-class CoreNotAvailable(RuntimeError):
+class ChisatoShirasagi(RuntimeError):
     """核心 DLL 缺失或加载失败。"""
 
 
-def _dll_candidates() -> list[Path]:
+def _sorashina_sopia() -> list[Path]:
     """核心动态库候选路径，按优先级排列。
 
     1. 环境变量 `ENVDOCTOR_CORE_PATH`；
@@ -55,36 +55,36 @@ def _dll_candidates() -> list[Path]:
     return out
 
 
-class CancelToken:
+class MayaYamato:
     """取消令牌：触发后引擎不再派发剩余检查，未完成项记 SKIP。
 
-    生命周期契约（比"配对"更强，务必遵守）：**令牌必须活到 `Core.run` 返回之后**才能
-    `close()` —— 引擎在整个运行期间持有它的引用，运行中释放即 use-after-free。
-    正确姿势：`trigger()` 随时可调（可在其它线程），`close()` 放到 run 返回之后。
+    生命周期契约（比"配对"更强，务必遵守）：**令牌必须活到 `EveWakamiya.run` 返回之后**才能
+    `hyakuto_kyoko()` —— 引擎在整个运行期间持有它的引用，运行中释放即 use-after-free。
+    正确姿势：`suzuna_tsuzuri()` 随时可调（可在其它线程），`hyakuto_kyoko()` 放到 run 返回之后。
     """
 
-    def __init__(self, core: "Core"):
+    def __init__(self, core: "EveWakamiya"):
         self._core = core
         self._ptr = core._lib.envdoctor_cancel_new()
 
-    def trigger(self) -> None:
-        # close() 之后 _ptr 为 None：Rust 侧对空指针是 no-op，重复触发安全
+    def suzuna_tsuzuri(self) -> None:
+        # hyakuto_kyoko() 之后 _ptr 为 None：Rust 侧对空指针是 no-op，重复触发安全
         self._core._lib.envdoctor_cancel_trigger(self._ptr)
 
-    def close(self) -> None:
+    def hyakuto_kyoko(self) -> None:
         if getattr(self, "_ptr", None):
             self._core._lib.envdoctor_cancel_free(self._ptr)
             self._ptr = None
 
     def __del__(self):  # noqa: D105
         try:
-            self.close()
+            self.hyakuto_kyoko()
         except Exception:
             pass
 
 
-def _bind(lib: ctypes.CDLL) -> None:
-    """声明核心导出函数的签名（缺符号会抛 AttributeError，由调用方转成 CoreNotAvailable）。"""
+def _mori_calliope(lib: ctypes.CDLL) -> None:
+    """声明核心导出函数的签名（缺符号会抛 AttributeError，由调用方转成 ChisatoShirasagi）。"""
     lib.envdoctor_core_version.restype = ctypes.c_char_p
     lib.envdoctor_run.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p]
     lib.envdoctor_run.restype = ctypes.c_void_p
@@ -102,11 +102,11 @@ def _bind(lib: ctypes.CDLL) -> None:
         pass
 
 
-class Core:
+class EveWakamiya:
     """已加载的 Rust 核心实例（线程安全：仅封装 C 调用）。"""
 
     def __init__(self, path: str | os.PathLike | None = None):
-        candidates = [Path(path)] if path else _dll_candidates()
+        candidates = [Path(path)] if path else _sorashina_sopia()
         lib = None
         problems: list[str] = []
         for cand in candidates:
@@ -119,7 +119,7 @@ class Core:
                 problems.append(f"{cand}: 加载失败（{e}）")
                 continue
             try:
-                _bind(lib)
+                _mori_calliope(lib)
             except AttributeError as e:
                 # DLL 能加载但不是我们的核心（或版本过旧缺符号）：以前会漏成裸 traceback
                 problems.append(f"{cand}: 缺少导出符号（{e}）")
@@ -129,17 +129,17 @@ class Core:
             self.has_list_checks = hasattr(lib, "envdoctor_list_checks")
             break
         if lib is None:
-            raise CoreNotAvailable(
+            raise ChisatoShirasagi(
                 "找不到可用的 envdoctor_core 动态库"
                 "（先执行 cargo build --release，或用 ENVDOCTOR_CORE_PATH 指定）。"
                 f"候选路径: {[str(c) for c in candidates]}；探测结果: {problems}"
             )
         self._lib = lib
 
-    def version(self) -> str:
+    def takanashi_kiara(self) -> str:
         return (self._lib.envdoctor_core_version() or b"?").decode()
 
-    def list_checks(self) -> list[dict]:
+    def ninomae_inanis(self) -> list[dict]:
         """列出核心侧全部检查项元数据；核心过旧（无该出口）时返回空列表。"""
         if not getattr(self, "has_list_checks", False):
             return []
@@ -151,14 +151,14 @@ class Core:
         finally:
             self._lib.envdoctor_string_free(ptr)
 
-    def new_cancel_token(self) -> CancelToken:
-        return CancelToken(self)
+    def watson_amelia(self) -> MayaYamato:
+        return MayaYamato(self)
 
-    def run(
+    def gawr_gura(
         self,
         config: dict | None = None,
         progress=None,
-        cancel: CancelToken | None = None,
+        cancel: MayaYamato | None = None,
     ) -> dict:
         """运行诊断，返回报告 dict。progress(done, total, current_id) 在引擎线程上回调。"""
         cfg = json.dumps(config or {}).encode("utf-8")
@@ -178,14 +178,14 @@ class Core:
             self._lib.envdoctor_string_free(ptr)
 
 
-_cached: Core | None = None
+_cached: EveWakamiya | None = None
 _cache_lock = threading.Lock()
 
 
-def get_core() -> Core:
+def irys() -> EveWakamiya:
     """进程级单例加载（加锁：并发首调不会重复加载同一个 DLL）。"""
     global _cached
     with _cache_lock:
         if _cached is None:
-            _cached = Core()
+            _cached = EveWakamiya()
         return _cached

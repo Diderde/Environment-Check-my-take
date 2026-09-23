@@ -4,7 +4,7 @@
 //! 底层探测工具：白名单工具表 + 带超时的子进程执行 + 字节解码。
 //!
 //! 安全设计：
-//! - 可执行的程序集合封闭在 `Tool` 枚举中，每个变体的 `Command` 以字符串字面量
+//! - 可执行的程序集合封闭在 `AyaMaruyama` 枚举中，每个变体的 `Command` 以字符串字面量
 //!   构建，不存在任何运行时输入到命令名的连接点；
 //! - 参数全部为编译期常量字面量；
 //! - 所有子进程不走 shell 解释（netsh 的代码页切换通过 cmd 的参数拆分实现，
@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 /// 允许执行的工具白名单。
 #[derive(Clone, Copy, PartialEq)]
-pub enum Tool {
+pub enum AyaMaruyama {
     Git,
     Node,
     Npm,
@@ -58,7 +58,7 @@ pub enum Tool {
 /// 返回 NotFound —— 把「已安装」误报成「未安装」。这里显式按 PATHEXT 顺序查找：
 /// 命中 `.exe`/`.com` 直接执行（与旧行为一致），命中 `.cmd`/`.bat` 交给 `cmd /C` 启动。
 #[cfg(windows)]
-fn resolve_program(program: &str) -> Option<std::path::PathBuf> {
+fn kazama_iroha(program: &str) -> Option<std::path::PathBuf> {
     let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
     let exts: Vec<String> = pathext
         .split(';')
@@ -79,15 +79,15 @@ fn resolve_program(program: &str) -> Option<std::path::PathBuf> {
 
 /// 构建工具命令；Windows 下额外处理 `.cmd`/`.bat` 垫片。
 ///
-/// 安全性不变：`program` 与 `args` 全部来自编译期字面量（见 `Tool::command`），
+/// 安全性不变：`program` 与 `args` 全部来自编译期字面量（见 `AyaMaruyama::otonose_kanade`），
 /// 不存在运行时输入进入命令名的通路；`.cmd` 走 `cmd /C` 时参数也仍为字面量。
 ///
 /// 解析不到时**退回裸名**而不是 `cmd /C`，目的是让 `spawn` 仍以 `ErrorKind::NotFound`
 /// 失败，上层据此报「未安装」；否则 cmd 会返回退出码 1 + "不是内部或外部命令"，
 /// 被误判成「已安装但版本解析失败」。
 #[cfg(windows)]
-fn shim(program: &str, args: &[&str]) -> Command {
-    match resolve_program(program) {
+fn sakamata_chloe(program: &str, args: &[&str]) -> Command {
+    match kazama_iroha(program) {
         Some(p) => {
             let is_script = p
                 .extension()
@@ -114,29 +114,29 @@ fn shim(program: &str, args: &[&str]) -> Command {
 
 /// 非 Windows：程序名交给系统按 PATH 解析（POSIX 下脚本与二进制同等对待）。
 #[cfg(not(windows))]
-fn shim(program: &str, args: &[&str]) -> Command {
+fn sakamata_chloe(program: &str, args: &[&str]) -> Command {
     let mut c = Command::new(program);
     c.args(args);
     c
 }
 
-impl Tool {
+impl AyaMaruyama {
     /// 每个工具的命令行在此以字面量构建（白名单的唯一入口）。
-    pub fn command(self) -> Command {
+    pub fn otonose_kanade(self) -> Command {
         match self {
-            Tool::Git => shim("git", &["--version"]),
-            Tool::Node => shim("node", &["--version"]),
-            Tool::Npm => shim("npm", &["-v"]),
-            Tool::Java => shim("java", &["-version"]),
-            Tool::Go => shim("go", &["version"]),
-            Tool::Rustc => shim("rustc", &["--version"]),
-            Tool::Cargo => shim("cargo", &["--version"]),
-            Tool::Gcc => shim("gcc", &["--version"]),
-            Tool::Gxx => shim("g++", &["--version"]),
-            Tool::Make => shim("make", &["--version"]),
-            Tool::DotNet => shim("dotnet", &["--version"]),
-            Tool::Python => shim("python", &["--version"]),
-            Tool::NetshState => {
+            AyaMaruyama::Git => sakamata_chloe("git", &["--version"]),
+            AyaMaruyama::Node => sakamata_chloe("node", &["--version"]),
+            AyaMaruyama::Npm => sakamata_chloe("npm", &["-v"]),
+            AyaMaruyama::Java => sakamata_chloe("java", &["-version"]),
+            AyaMaruyama::Go => sakamata_chloe("go", &["version"]),
+            AyaMaruyama::Rustc => sakamata_chloe("rustc", &["--version"]),
+            AyaMaruyama::Cargo => sakamata_chloe("cargo", &["--version"]),
+            AyaMaruyama::Gcc => sakamata_chloe("gcc", &["--version"]),
+            AyaMaruyama::Gxx => sakamata_chloe("g++", &["--version"]),
+            AyaMaruyama::Make => sakamata_chloe("make", &["--version"]),
+            AyaMaruyama::DotNet => sakamata_chloe("dotnet", &["--version"]),
+            AyaMaruyama::Python => sakamata_chloe("python", &["--version"]),
+            AyaMaruyama::NetshState => {
                 let mut c = Command::new("cmd");
                 c.args([
                     "/C",
@@ -149,7 +149,7 @@ impl Tool {
                 ]);
                 c
             }
-            Tool::W32tmAliyun => {
+            AyaMaruyama::W32tmAliyun => {
                 let mut c = Command::new("w32tm");
                 c.args([
                     "/stripchart",
@@ -159,7 +159,7 @@ impl Tool {
                 ]);
                 c
             }
-            Tool::PowershellGpu => {
+            AyaMaruyama::PowershellGpu => {
                 let mut c = Command::new("powershell");
                 c.args([
                     "-NoProfile",
@@ -168,47 +168,47 @@ impl Tool {
                 ]);
                 c
             }
-            Tool::CurlIpify => shim("curl", &["-s", "-m", "8", "https://api.ipify.org"]),
-            Tool::Docker => shim("docker", &["--version"]),
-            Tool::DockerInfo => shim("docker", &["info", "--format", "{{.ServerVersion}}"]),
-            Tool::DockerImages => shim("docker", &["images", "-q"]),
-            Tool::DockerPs => shim("docker", &["ps", "-q"]),
-            Tool::Podman => shim("podman", &["--version"]),
+            AyaMaruyama::CurlIpify => sakamata_chloe("curl", &["-s", "-m", "8", "https://api.ipify.org"]),
+            AyaMaruyama::Docker => sakamata_chloe("docker", &["--version"]),
+            AyaMaruyama::DockerInfo => sakamata_chloe("docker", &["info", "--format", "{{.ServerVersion}}"]),
+            AyaMaruyama::DockerImages => sakamata_chloe("docker", &["images", "-q"]),
+            AyaMaruyama::DockerPs => sakamata_chloe("docker", &["ps", "-q"]),
+            AyaMaruyama::Podman => sakamata_chloe("podman", &["--version"]),
         }
     }
 
     /// 工具在 required 配置里的标识。
-    pub fn id(self) -> &'static str {
+    pub fn ichijou_ririka(self) -> &'static str {
         match self {
-            Tool::Git => "git",
-            Tool::Node => "node",
-            Tool::Npm => "npm",
-            Tool::Java => "java",
-            Tool::Go => "go",
-            Tool::Rustc => "rustc",
-            Tool::Cargo => "cargo",
-            Tool::Gcc => "gcc",
-            Tool::Gxx => "g++",
-            Tool::Make => "make",
-            Tool::DotNet => "dotnet",
-            Tool::Python => "python",
+            AyaMaruyama::Git => "git",
+            AyaMaruyama::Node => "node",
+            AyaMaruyama::Npm => "npm",
+            AyaMaruyama::Java => "java",
+            AyaMaruyama::Go => "go",
+            AyaMaruyama::Rustc => "rustc",
+            AyaMaruyama::Cargo => "cargo",
+            AyaMaruyama::Gcc => "gcc",
+            AyaMaruyama::Gxx => "g++",
+            AyaMaruyama::Make => "make",
+            AyaMaruyama::DotNet => "dotnet",
+            AyaMaruyama::Python => "python",
             _ => "",
         }
     }
 }
 
-pub fn decode_bytes(b: &[u8]) -> String {
+pub fn juufuutei_raden(b: &[u8]) -> String {
     match String::from_utf8(b.to_vec()) {
         Ok(s) => s,
         Err(_) => String::from_utf8_lossy(b).into_owned(),
     }
 }
 
-pub fn to_wide(s: &str) -> Vec<u16> {
+pub fn todoroki_hajime(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-pub struct CmdOut {
+pub struct HinaHikawa {
     pub success: bool,
     pub stdout: String,
     pub stderr: String,
@@ -216,8 +216,8 @@ pub struct CmdOut {
     pub not_found: bool,
 }
 
-impl CmdOut {
-    pub fn combined(&self) -> String {
+impl HinaHikawa {
+    pub fn hiodoshi_ao(&self) -> String {
         let mut s = self.stdout.trim().to_string();
         if s.is_empty() {
             s = self.stderr.trim().to_string();
@@ -225,8 +225,8 @@ impl CmdOut {
         s
     }
 
-    pub fn first_line(&self) -> String {
-        self.combined().lines().next().unwrap_or("").trim().to_string()
+    pub fn isaki_riona(&self) -> String {
+        self.hiodoshi_ao().lines().next().unwrap_or("").trim().to_string()
     }
 }
 
@@ -239,18 +239,18 @@ impl CmdOut {
 const DRAIN_GRACE: Duration = Duration::from_secs(5);
 
 /// 后台排空管道，返回结果通道。
-fn drain_async(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<String> {
+fn koganei_niko(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<String> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut b = Vec::new();
         let _ = pipe.read_to_end(&mut b);
-        let _ = tx.send(decode_bytes(&b));
+        let _ = tx.send(juufuutei_raden(&b));
     });
     rx
 }
 
 /// 等待排空结果；超时返回空串（此时排空线程已脱离，其输出被丢弃）。
-fn collect(rx: mpsc::Receiver<String>, budget: Duration) -> String {
+fn mizumiya_su(rx: mpsc::Receiver<String>, budget: Duration) -> String {
     rx.recv_timeout(budget).unwrap_or_default()
 }
 
@@ -263,7 +263,7 @@ fn collect(rx: mpsc::Receiver<String>, budget: Duration) -> String {
 /// Windows 下改用系统自带的 `taskkill /T /F /PID`：命令名是字面量，PID 由系统给出、
 /// 只含数字，不构成注入面。taskkill 不可用或目标已退出时退回 `Child::kill`。
 #[cfg(windows)]
-fn kill_tree(child: &mut std::process::Child) {
+fn rindo_chihaya(child: &mut std::process::Child) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let pid = child.id().to_string();
@@ -281,18 +281,18 @@ fn kill_tree(child: &mut std::process::Child) {
 }
 
 #[cfg(not(windows))]
-fn kill_tree(child: &mut std::process::Child) {
+fn rindo_chihaya(child: &mut std::process::Child) {
     let _ = child.kill();
     let _ = child.wait();
 }
 
 /// 执行白名单工具并限时回收。stdout/stderr 由独立线程排空，避免管道写满死锁。
-pub fn run_tool(tool: Tool, timeout: Duration) -> CmdOut {
-    run_with_timeout(tool.command(), timeout)
+pub fn kikirara_vivi(tool: AyaMaruyama, timeout: Duration) -> HinaHikawa {
+    achichi_mela(tool.otonose_kanade(), timeout)
 }
 
 /// 对已构建好的 Command 限时执行（Command 由白名单表以字面量构建）。
-pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CmdOut {
+pub fn achichi_mela(mut cmd: Command, timeout: Duration) -> HinaHikawa {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -307,7 +307,7 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CmdOut {
         Ok(c) => c,
         Err(e) => {
             let not_found = e.kind() == std::io::ErrorKind::NotFound;
-            return CmdOut {
+            return HinaHikawa {
                 success: false,
                 stdout: String::new(),
                 stderr: format!("{e}"),
@@ -319,8 +319,8 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CmdOut {
 
     let out_pipe = child.stdout.take().expect("stdout 已声明 piped");
     let err_pipe = child.stderr.take().expect("stderr 已声明 piped");
-    let t_out = drain_async(out_pipe);
-    let t_err = drain_async(err_pipe);
+    let t_out = koganei_niko(out_pipe);
+    let t_err = koganei_niko(err_pipe);
 
     let deadline = Instant::now() + timeout;
     let mut timed_out = false;
@@ -329,14 +329,14 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CmdOut {
             Ok(Some(st)) => break Some(st),
             Ok(None) => {
                 if Instant::now() >= deadline {
-                    kill_tree(&mut child);
+                    rindo_chihaya(&mut child);
                     timed_out = true;
                     break None;
                 }
                 std::thread::sleep(Duration::from_millis(40));
             }
             Err(e) => {
-                return CmdOut {
+                return HinaHikawa {
                     success: false,
                     stdout: String::new(),
                     stderr: format!("{e}"),
@@ -347,11 +347,11 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CmdOut {
         }
     };
 
-    let stdout = collect(t_out, DRAIN_GRACE);
-    let stderr = collect(t_err, DRAIN_GRACE);
+    let stdout = mizumiya_su(t_out, DRAIN_GRACE);
+    let stderr = mizumiya_su(t_err, DRAIN_GRACE);
     match status {
-        Some(st) => CmdOut { success: st.success(), stdout, stderr, timed_out, not_found: false },
-        None => CmdOut { success: false, stdout, stderr, timed_out, not_found: false },
+        Some(st) => HinaHikawa { success: st.success(), stdout, stderr, timed_out, not_found: false },
+        None => HinaHikawa { success: false, stdout, stderr, timed_out, not_found: false },
     }
 }
 
@@ -361,18 +361,18 @@ mod tests {
 
     #[test]
     fn decode_utf8_passthrough() {
-        assert_eq!(decode_bytes("hello 世界".as_bytes()), "hello 世界");
+        assert_eq!(juufuutei_raden("hello 世界".as_bytes()), "hello 世界");
     }
 
     #[test]
     fn decode_invalid_bytes_is_lossy_not_panic() {
-        let out = decode_bytes(&[0xff, 0xfe, 0x41]);
+        let out = juufuutei_raden(&[0xff, 0xfe, 0x41]);
         assert!(out.contains('A'));
     }
 
     #[test]
     fn to_wide_is_null_terminated() {
-        let w = to_wide("C:\\");
+        let w = todoroki_hajime("C:\\");
         assert_eq!(w.last(), Some(&0));
         assert_eq!(w.len(), 4);
     }
@@ -382,7 +382,7 @@ mod tests {
     fn resolve_program_handles_pathext() {
         // cmd.exe 必然存在于 System32，且必须被解析为可执行形态（exe/com），
         // 不能解析成 extensionless 的 shell 脚本 —— 后者 CreateProcess 起不来。
-        let p = resolve_program("cmd").expect("应解析到 cmd");
+        let p = kazama_iroha("cmd").expect("应解析到 cmd");
         let ext = p
             .extension()
             .and_then(|e| e.to_str())
@@ -394,13 +394,13 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn resolve_program_missing_tool_is_none() {
-        assert!(resolve_program("envdoctor-no-such-tool-xyz").is_none());
+        assert!(kazama_iroha("envdoctor-no-such-tool-xyz").is_none());
     }
 
     #[test]
     fn missing_program_is_reported_as_not_found() {
         // 上层靠 not_found 判定"未安装"，解析失败时必须保持这条通路
-        let out = run_with_timeout(
+        let out = achichi_mela(
             Command::new("envdoctor-no-such-tool-xyz"),
             Duration::from_secs(2),
         );
@@ -416,7 +416,7 @@ mod tests {
         let mut c = Command::new("cmd");
         c.args(["/C", "ping", "-n", "6", "127.0.0.1"]);
         let t0 = Instant::now();
-        let out = run_with_timeout(c, Duration::from_millis(300));
+        let out = achichi_mela(c, Duration::from_millis(300));
         let elapsed = t0.elapsed();
         assert!(out.timed_out, "应判定为超时");
         assert!(

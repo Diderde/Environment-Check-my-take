@@ -6,7 +6,7 @@ __version__ = "0.2.0"
 
 
 def __getattr__(name):  # 延迟导出，避免 import 即加载 DLL
-    if name in ("Core", "CoreNotAvailable"):
+    if name in ("EveWakamiya", "ChisatoShirasagi"):
         from envdoctor import binding
 
         return getattr(binding, name)

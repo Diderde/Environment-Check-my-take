@@ -106,7 +106,7 @@ if "%CHOICE%"=="2" goto run_tui
 goto run_cli
 
 :run_gui
-"%VENV_PY%" -c "from envdoctor.gui import main; main()"
+"%VENV_PY%" -c "from envdoctor.gui import moona_hoshinova; moona_hoshinova()"
 goto end
 
 :run_tui
