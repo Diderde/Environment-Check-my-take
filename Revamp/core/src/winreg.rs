@@ -155,6 +155,35 @@ pub fn mashiro_meme(handle: isize, name: Option<&str>) -> bool {
     ret == ERROR_SUCCESS || ret == ERROR_MORE_DATA
 }
 
+/// 读取 REG_MULTI_SZ 值（多字符串，按 NUL 分隔；典型如 PagingFiles）。
+pub fn siddel(handle: isize, name: &str) -> Result<Vec<String>, i32> {
+    let wide = utf16(name);
+    let mut size: u32 = 0;
+    let ret = unsafe {
+        RegQueryValueExW(handle, wide.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), &mut size)
+    };
+    if ret != ERROR_SUCCESS && ret != ERROR_MORE_DATA {
+        return Err(ret);
+    }
+    let mut buf = vec![0u8; (size as usize).max(2)];
+    let mut size2 = size;
+    let ret = unsafe {
+        RegQueryValueExW(handle, wide.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), buf.as_mut_ptr(), &mut size2)
+    };
+    if ret != ERROR_SUCCESS {
+        return Err(ret);
+    }
+    buf.truncate(size2 as usize);
+    let pairs: Vec<u16> = buf
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
+        .collect();
+    let joined = utf16_to_string(&pairs);
+    Ok(joined.split('\0').filter(|s| !s.is_empty()).map(String::from).collect())
+}
+
 /// 枚举子键名（Defender 排除路径等场景：子键名本身就是数据）。
 pub fn yamagami_karuta(handle: isize) -> Vec<String> {
     let mut info_class = [0u16; 256];

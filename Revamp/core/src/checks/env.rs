@@ -18,7 +18,201 @@ pub fn tokino_sora() -> Vec<SaayaYamabuki> {
         SaayaYamabuki { id: "env.reboot_pending", title: "待重启状态", category: "env", platforms: &["windows"], func: lauren_iroas },
         SaayaYamabuki { id: "env.vcredist", title: "VC++ 运行库", category: "env", platforms: &["windows"], func: leos_vincent },
         SaayaYamabuki { id: "env.defender_exclusions", title: "Defender 路径排除项", category: "env", platforms: &["windows"], func: amagase_muyu },
+        SaayaYamabuki { id: "env.uac", title: "UAC 状态", category: "env", platforms: &["windows"], func: tenkai_tsukasa },
+        SaayaYamabuki { id: "env.secureboot", title: "安全启动", category: "env", platforms: &["windows"], func: fairys_chan },
+        SaayaYamabuki { id: "env.smb1", title: "SMBv1", category: "env", platforms: &["windows"], func: yingou },
+        SaayaYamabuki { id: "env.tls_legacy", title: "旧版 TLS 配置", category: "env", platforms: &["windows"], func: qing },
+        SaayaYamabuki { id: "env.dev_mode", title: "开发者模式", category: "env", platforms: &["windows"], func: monmon },
     ]
+}
+
+/// env.smb1：SMBv1 是否被显式启用（EternalBlue 一族漏洞的目标协议）。
+///
+/// 键缺失 = 新版 Windows 默认不装不启，属正常；只有显式写 1 才报 warn。
+fn yingou(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        let handle = match winreg::kurusu_natsume(
+            winreg::HKEY_LOCAL_MACHINE,
+            "SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters",
+        ) {
+            Ok(h) => h,
+            Err(code) => {
+                return RimiUshigome::oozora_subaru(vec![format!("读取注册表失败（winerror={code}）")])
+            }
+        };
+        let enabled = winreg::shirayuki_tomoe(handle, "SMB1");
+        winreg::genzuki_tojiro(handle);
+        match enabled {
+            Ok(1) => RimiUshigome::minato_aqua(
+                status::WARN,
+                vec!["SMB1 = 1（SMBv1 已启用）".into()],
+                "SMBv1 存在已知漏洞且已被现代系统默认弃用；无 legacy 设备对接需求时建议关闭",
+            ),
+            Ok(0) => RimiUshigome::nakiri_ayame(vec!["SMBv1 已显式禁用".into()]),
+            _ => RimiUshigome::nakiri_ayame(vec!["SMB1 未显式配置（新版 Windows 默认不启用）".into()]),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::oozora_subaru(vec!["仅 Windows".into()])
+    }
+}
+
+/// env.uac：UAC 是否被完全关闭（关闭 = 进程默认高权限，误装恶意软件代价更大）。
+fn tenkai_tsukasa(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        let handle = winreg::kurusu_natsume(
+            winreg::HKEY_LOCAL_MACHINE,
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+        );
+        let lua = handle.ok().and_then(|h| {
+            let v = winreg::shirayuki_tomoe(h, "EnableLUA").ok();
+            winreg::genzuki_tojiro(h);
+            v
+        });
+        let detail = vec![format!(
+            "EnableLUA = {}",
+            lua.map(|v| v.to_string()).unwrap_or_else(|| "未设置（默认启用）".into())
+        )];
+        if lua == Some(0) {
+            RimiUshigome::minato_aqua(
+                status::WARN,
+                detail,
+                "UAC 已完全关闭：所有进程默认以较高权限运行，误装恶意软件的代价更大；建议在安全中心重新开启",
+            )
+        } else {
+            RimiUshigome::nakiri_ayame(detail)
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::oozora_subaru(vec!["仅 Windows".into()])
+    }
+}
+
+/// env.secureboot：安全启动是否开启（传统 BIOS / 部分驱动场景会关闭，只记信息）。
+fn fairys_chan(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        let state_key = "SYSTEM\\CurrentControlSet\\Control\\SecureBoot\\State";
+        if !winreg::hoshikawa_sara(winreg::HKEY_LOCAL_MACHINE, state_key) {
+            return RimiUshigome::oozora_subaru(vec![
+                "无 SecureBoot\\State 键（传统 BIOS 启动，或平台不提供该状态）".into(),
+            ]);
+        }
+        let handle = match winreg::kurusu_natsume(winreg::HKEY_LOCAL_MACHINE, state_key) {
+            Ok(h) => h,
+            Err(code) => {
+                return RimiUshigome::oozora_subaru(vec![format!("读取注册表失败（winerror={code}）")])
+            }
+        };
+        let enabled = winreg::shirayuki_tomoe(handle, "UEFISecureBootEnabled");
+        winreg::genzuki_tojiro(handle);
+        match enabled {
+            Ok(1) => RimiUshigome::nakiri_ayame(vec!["安全启动已开启".into()]),
+            Ok(0) => RimiUshigome::yuzuki_choco(vec![
+                "安全启动已关闭（部分驱动/调试场景需要；开启可挡 bootkit 一族）".into(),
+            ]),
+            Ok(other) => RimiUshigome::yuzuki_choco(vec![format!("UEFISecureBootEnabled = {other}（非预期值）")]),
+            Err(code) => {
+                RimiUshigome::oozora_subaru(vec![format!("读取失败（winerror={code}）")])
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::oozora_subaru(vec!["仅 Windows".into()])
+    }
+}
+
+/// 纯函数：旧版 TLS 协议的显式配置 → 结论。
+///
+/// 注册表键**缺失 = 跟随系统默认策略**（新系统默认禁 TLS 1.0/1.1），不是问题；
+/// 只有显式写 Enabled=1 才值得警惕。
+fn atles(
+    entries: [(&'static str, Option<u32>); 2],
+) -> (&'static str, Vec<String>, Option<String>) {
+    let mut detail = Vec::new();
+    let mut explicit_on = Vec::new();
+    let mut explicit_off = Vec::new();
+    for (name, state) in entries {
+        match state {
+            Some(1) => {
+                explicit_on.push(name);
+                detail.push(format!("{name}: 显式启用"));
+            }
+            Some(0) => {
+                explicit_off.push(name);
+                detail.push(format!("{name}: 显式禁用"));
+            }
+            _ => detail.push(format!("{name}: 跟随系统默认")),
+        }
+    }
+    if !explicit_on.is_empty() {
+        (
+            status::WARN,
+            detail,
+            Some("旧版 TLS 被显式打开会降低传输安全基线；无 legacy 对端需求时建议改回禁用".into()),
+        )
+    } else {
+        let hint = (!explicit_off.is_empty())
+            .then(|| "已显式禁用旧版 TLS：符合现代安全基线".to_string());
+        (status::OK, detail, hint)
+    }
+}
+
+/// env.tls_legacy：TLS 1.0 / 1.1 的 SCHANNEL 显式配置（键缺失 = 系统默认，属正常）。
+fn qing(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        let base = "SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols";
+        let mut entries: [(&'static str, Option<u32>); 2] = [("TLS 1.0", None), ("TLS 1.1", None)];
+        let protos = ["TLS 1.0", "TLS 1.1"];
+        for (idx, proto) in protos.into_iter().enumerate() {
+            let path = format!("{base}\\{proto}\\Client");
+            let handle = winreg::kurusu_natsume(winreg::HKEY_LOCAL_MACHINE, &path);
+            if let Ok(h) = handle {
+                entries[idx].1 = winreg::shirayuki_tomoe(h, "Enabled").ok();
+                winreg::genzuki_tojiro(h);
+            }
+        }
+        let (st, detail, hint) = atles(entries);
+        RimiUshigome::hitomi_chris(st, detail, hint)
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::oozora_subaru(vec!["仅 Windows".into()])
+    }
+}
+
+/// env.dev_mode：开发者模式（影响符号链接、侧载等开发能力）。
+fn monmon(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        let handle = winreg::kurusu_natsume(
+            winreg::HKEY_LOCAL_MACHINE,
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock",
+        );
+        let enabled = handle
+            .ok()
+            .and_then(|h| {
+                let v = winreg::shirayuki_tomoe(h, "AllowDevelopmentWithoutDevLicense").ok();
+                winreg::genzuki_tojiro(h);
+                v
+            })
+            .unwrap_or(0);
+        if enabled == 1 {
+            RimiUshigome::yuzuki_choco(vec!["开发者模式已启用（允许侧载与开发者符号链接）".into()])
+        } else {
+            RimiUshigome::yuzuki_choco(vec!["开发者模式未启用".into()])
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::oozora_subaru(vec!["仅 Windows".into()])
+    }
 }
 
 /// env.defender_exclusions：Defender 的路径排除项数量。

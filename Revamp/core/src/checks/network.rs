@@ -21,7 +21,34 @@ pub fn tokino_sora() -> Vec<SaayaYamabuki> {
         SaayaYamabuki { id: "network.ports", title: "常用开发端口占用", category: "network", platforms: &[], func: hoshimachi_suisei },
         SaayaYamabuki { id: "network.public_ip", title: "公网 IP", category: "network", platforms: &[], func: tokoyami_towa },
         SaayaYamabuki { id: "network.ipv6", title: "IPv6 可用性", category: "network", platforms: &["windows"], func: sister_claire },
+        SaayaYamabuki { id: "network.wevt_errors", title: "系统错误事件", category: "network", platforms: &["windows"], func: talency },
     ]
+}
+
+/// network.wevt_errors：最近的系统错误级事件可见性（ASCII 标记计数，不受控制台代码页影响）。
+fn talency(_cfg: &MocaAoba) -> RimiUshigome {
+    let out = probes::kikirara_vivi(AyaMaruyama::WevtutilSystemErrors, Duration::from_secs(15));
+    if out.not_found {
+        return RimiUshigome::oozora_subaru(vec!["未找到 wevtutil".into()]);
+    }
+    if out.timed_out {
+        return RimiUshigome::yuzuki_choco(vec!["系统日志查询超时".into()]);
+    }
+    if !out.success {
+        return RimiUshigome::oozora_subaru(vec![format!(
+            "查询失败（{}）",
+            out.isaki_riona().lines().next().unwrap_or("").trim()
+        )]);
+    }
+    let count = out.stdout.matches("<Event").count();
+    if count > 0 {
+        RimiUshigome::yuzuki_choco(vec![
+            format!("系统日志最近拉取的 {count} 条记录均为错误级（倒序）"),
+            "错误集中出现通常与驱动/硬件/服务异常相关；可用事件查看器按时间核对".into(),
+        ])
+    } else {
+        RimiUshigome::nakiri_ayame(vec!["系统日志最新记录中无错误级事件".into()])
+    }
 }
 
 /// IPv6 相关 Win32 结构体与 `GetAdaptersAddresses` 声明。

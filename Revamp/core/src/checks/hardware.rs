@@ -6,6 +6,7 @@
 use super::{SaayaYamabuki, RimiUshigome};
 use crate::model::{status, MocaAoba};
 use crate::probes;
+use crate::winreg;
 
 #[cfg(windows)]
 mod ffi {
@@ -63,6 +64,9 @@ pub fn tokino_sora() -> Vec<SaayaYamabuki> {
         SaayaYamabuki { id: "hardware.disk", title: "系统盘空间", category: "hardware", platforms: &["windows"], func: aki_rosenthal },
         SaayaYamabuki { id: "hardware.gpu", title: "显卡", category: "hardware", platforms: &["windows"], func: yozora_mel },
         SaayaYamabuki { id: "hardware.cpu_features", title: "CPU 指令集", category: "hardware", platforms: &["windows"], func: todoroki_kyoko },
+        SaayaYamabuki { id: "hardware.pagefile", title: "页面文件", category: "hardware", platforms: &["windows"], func: dailechi },
+        SaayaYamabuki { id: "hardware.smart", title: "磁盘健康 (SMART)", category: "hardware", platforms: &["windows"], func: chen_kuang_kuang_probe },
+        SaayaYamabuki { id: "hardware.power_plan", title: "电源计划", category: "hardware", platforms: &["windows"], func: kobayakawa_nana },
     ]
 }
 
@@ -265,6 +269,123 @@ fn yozora_mel(_cfg: &MocaAoba) -> RimiUshigome {
     } else {
         RimiUshigome::nakiri_ayame(gpus)
     }
+}
+
+/// 纯函数：PagingFiles 注册表内容 → 结论（空/系统托管/显式列表）。
+fn nagao_kei(files: &[String]) -> (&'static str, Vec<String>, Option<String>) {
+    if files.is_empty() {
+        return (
+            status::WARN,
+            vec!["未配置任何页面文件（或已全部禁用）".into()],
+            Some(
+                "内存吃紧时进程会被直接终止而不是换页；大项目编译/跑容器的机器建议保留系统托管的页面文件"
+                    .to_string(),
+            ),
+        );
+    }
+    let managed = files.iter().any(|f| f.starts_with("?:\\") || f.contains("\\??\\"));
+    let mut detail: Vec<String> = files.iter().map(|f| format!("  {f}")).collect();
+    if managed {
+        detail.insert(0, "页面文件: 系统托管".into());
+        (status::OK, detail, None)
+    } else {
+        detail.insert(0, "页面文件: 手工配置".into());
+        (status::OK, detail, None)
+    }
+}
+
+/// hardware.pagefile：页面文件配置（Session Manager\\Memory Management\\PagingFiles）。
+fn dailechi(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        let handle = match winreg::kurusu_natsume(
+            winreg::HKEY_LOCAL_MACHINE,
+            "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management",
+        ) {
+            Ok(h) => h,
+            Err(code) => {
+                return RimiUshigome::oozora_subaru(vec![format!("读取注册表失败（winerror={code}）")])
+            }
+        };
+        let files = winreg::siddel(handle, "PagingFiles").unwrap_or_default();
+        winreg::genzuki_tojiro(handle);
+        let (st, detail, hint) = nagao_kei(&files);
+        RimiUshigome::hitomi_chris(st, detail, hint)
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::oozora_subaru(vec!["仅 Windows".into()])
+    }
+}
+
+/// 纯函数：磁盘 Status 行 → 结论。
+fn chen_kuang_kuang(lines: &[String]) -> (&'static str, Vec<String>, Option<String>) {
+    let drives: Vec<String> = lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            let (model, status) = l.split_once('|').unwrap_or((l.as_str(), "未知"));
+            format!("{} → {}", model.trim(), status.trim())
+        })
+        .collect();
+    if drives.is_empty() {
+        return (status::SKIP, vec!["未获取到磁盘信息".into()], None);
+    }
+    let bad: Vec<&String> = drives
+        .iter()
+        .filter(|d| !d.to_lowercase().contains("→ ok"))
+        .collect();
+    if bad.is_empty() {
+        (status::OK, drives, None)
+    } else {
+        (
+            status::WARN,
+            drives,
+            Some("存在状态异常的物理磁盘：SMART 预警意味着数据风险，建议尽快备份并更换".into()),
+        )
+    }
+}
+
+/// hardware.smart：物理磁盘 SMART 状态（Win32_DiskDrive.Status，无需管理员）。
+fn chen_kuang_kuang_probe(_cfg: &MocaAoba) -> RimiUshigome {
+    let out = probes::kikirara_vivi(probes::AyaMaruyama::PsDiskHealth, std::time::Duration::from_secs(15));
+    if out.not_found {
+        return RimiUshigome::oozora_subaru(vec!["未找到 powershell".into()]);
+    }
+    if out.timed_out {
+        return RimiUshigome::yuzuki_choco(vec!["磁盘健康查询超时".into()]);
+    }
+    let lines: Vec<String> = out
+        .stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let (st, detail, hint) = chen_kuang_kuang(&lines);
+    RimiUshigome::hitomi_chris(st, detail, hint)
+}
+
+/// hardware.power_plan：活动电源计划（节能计划会明显拖慢编译）。
+fn kobayakawa_nana(_cfg: &MocaAoba) -> RimiUshigome {
+    let out = probes::kikirara_vivi(probes::AyaMaruyama::PowerCfgActive, std::time::Duration::from_secs(10));
+    if out.not_found {
+        return RimiUshigome::oozora_subaru(vec!["未找到 powercfg".into()]);
+    }
+    if out.timed_out {
+        return RimiUshigome::yuzuki_choco(vec!["电源计划查询超时".into()]);
+    }
+    let text = out.isaki_riona();
+    if text.is_empty() {
+        return RimiUshigome::yuzuki_choco(vec!["未获取到电源计划".into()]);
+    }
+    if text.contains("节电") || text.to_lowercase().contains("power saver") || text.contains("节能") {
+        return RimiUshigome::minato_aqua(
+            status::WARN,
+            vec![text],
+            "节电计划会限制 CPU 频率，编译/测试明显变慢；建议改用高性能或平衡计划",
+        );
+    }
+    RimiUshigome::nakiri_ayame(vec![text])
 }
 
 #[cfg(test)]

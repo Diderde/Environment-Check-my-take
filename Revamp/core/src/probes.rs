@@ -59,6 +59,16 @@ pub enum AyaMaruyama {
     Vswhere,
     /// Kubernetes CLI（--version --client 只查客户端，不触集群）
     Kubectl,
+    /// 活动电源计划（chcp 65001 保证中文名称可读）
+    PowerCfgActive,
+    /// 系统日志最近 50 条错误级事件（XML 计数用 ASCII 标记）
+    WevtutilSystemErrors,
+    /// Docker Compose v2
+    DockerCompose,
+    /// 磁盘 SMART 状态（Win32_DiskDrive.Status）
+    PsDiskHealth,
+    /// FFmpeg 版本
+    Ffmpeg,
 }
 
 /// Windows 上按 PATHEXT 在 PATH 中解析可执行文件。
@@ -193,6 +203,45 @@ impl AyaMaruyama {
                 &["-latest", "-property", "installationVersion"],
             ),
             AyaMaruyama::Kubectl => sakamata_chloe("kubectl", &["version", "--client"]),
+            AyaMaruyama::PowerCfgActive => {
+                let mut c = Command::new("cmd");
+                c.args(["/C", "chcp", "65001>nul&powercfg", "/getactivescheme"]);
+                c
+            }
+            AyaMaruyama::WevtutilSystemErrors => {
+                let mut c = Command::new("cmd");
+                c.args([
+                    "/C",
+                    "chcp",
+                    "65001>nul&wevtutil",
+                    "qe",
+                    "System",
+                    "/q:*[System[(Level=2)]]",
+                    "/c:50",
+                    "/rd:true",
+                    "/f:XML",
+                ]);
+                c
+            }
+            AyaMaruyama::DockerCompose => {
+                let mut c = Command::new("docker");
+                c.args(["compose", "version", "--short"]);
+                c
+            }
+            AyaMaruyama::PsDiskHealth => {
+                let mut c = Command::new("powershell");
+                c.args([
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_DiskDrive | ForEach-Object { \"$($_.Model)|$($_.Status)\" }",
+                ]);
+                c
+            }
+            AyaMaruyama::Ffmpeg => {
+                let mut c = Command::new("ffmpeg");
+                c.args(["-version"]);
+                c
+            }
         }
     }
 

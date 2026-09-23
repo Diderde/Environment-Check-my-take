@@ -6,11 +6,14 @@
 use super::{SaayaYamabuki, RimiUshigome};
 use crate::model::{status, MocaAoba};
 use crate::probes::{self, AyaMaruyama};
+use crate::winreg;
 use std::time::Duration;
 
 pub fn tokino_sora() -> Vec<SaayaYamabuki> {
     vec![
         SaayaYamabuki { id: "containers.docker", title: "Docker", category: "containers", platforms: &[], func: robocosan },
+        SaayaYamabuki { id: "containers.compose", title: "Docker Compose", category: "containers", platforms: &[], func: siarurin },
+        SaayaYamabuki { id: "containers.wsl", title: "WSL 发行版", category: "containers", platforms: &["windows"], func: mifentan },
         SaayaYamabuki { id: "containers.podman", title: "Podman", category: "containers", platforms: &[], func: sakura_miko },
     ]
 }
@@ -59,5 +62,46 @@ fn sakura_miko(_cfg: &MocaAoba) -> RimiUshigome {
         RimiUshigome::hitomi_chris(status::TIMEOUT, vec!["podman --version 超时".into()], None)
     } else {
         RimiUshigome::nakiri_ayame(vec![ver.isaki_riona()])
+    }
+}
+
+/// containers.compose：Compose v2（docker 子命令形态；独立 compose v1 不认）。
+fn siarurin(_cfg: &MocaAoba) -> RimiUshigome {
+    let ver = probes::kikirara_vivi(AyaMaruyama::DockerCompose, Duration::from_secs(10));
+    if ver.not_found {
+        return RimiUshigome::yuzuki_choco(vec!["Docker Compose 不可用（未安装或 docker 未装）".into()]);
+    }
+    if ver.timed_out {
+        return RimiUshigome::hitomi_chris(status::TIMEOUT, vec!["docker compose version 超时".into()], None);
+    }
+    if ver.success && !ver.stdout.trim().is_empty() {
+        RimiUshigome::nakiri_ayame(vec![format!("Docker Compose v2: {}", ver.stdout.trim())])
+    } else {
+        RimiUshigome::yuzuki_choco(vec!["compose 不可用（可能只有 docker-compose v1）".into()])
+    }
+}
+
+/// containers.wsl：已注册的发行版数量（Lxss 注册表子键，无需运行 wsl.exe）。
+fn mifentan(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        let handle = match winreg::kurusu_natsume(
+            winreg::HKEY_LOCAL_MACHINE,
+            "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Lxss",
+        ) {
+            Ok(h) => h,
+            Err(_) => return RimiUshigome::yuzuki_choco(vec!["WSL 未安装".into()]),
+        };
+        let count = winreg::yamagami_karuta(handle).len();
+        winreg::genzuki_tojiro(handle);
+        if count == 0 {
+            RimiUshigome::yuzuki_choco(vec!["WSL 已安装但无已注册发行版".into()])
+        } else {
+            RimiUshigome::nakiri_ayame(vec![format!("已注册 {count} 个 WSL 发行版")])
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::yuzuki_choco(vec!["仅 Windows".into()])
     }
 }
