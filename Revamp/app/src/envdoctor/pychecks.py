@@ -85,6 +85,16 @@ def check_multiplicity(cfg: dict) -> dict:
         r = subprocess.run(["where.exe", "python"], capture_output=True, timeout=8)
         found = [l.strip() for l in r.stdout.decode("utf-8", "replace").splitlines() if l.strip()]
         detail = [f"where python: {p}" for p in found]
+        # WindowsApps 下的商店存根不是真解释器，不计入多版本数量
+        ignored_stubs = 0
+        winapps = os.environ.get("LOCALAPPDATA")
+        if winapps:
+            wa = str(Path(winapps) / "Microsoft" / "WindowsApps").lower()
+            stubs = [p for p in found if p.lower().startswith(wa)]
+            ignored_stubs = len(stubs)
+            found = [p for p in found if not p.lower().startswith(wa)]
+        if ignored_stubs:
+            detail.append(f"另有 {ignored_stubs} 个 Store 存根未计入")
         py = shutil.which("py")
         if py:
             r2 = subprocess.run(["py", "-0p"], capture_output=True, timeout=8)

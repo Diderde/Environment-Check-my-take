@@ -4,7 +4,12 @@
 
 DLL 查找顺序：
 1. 环境变量 ENVDOCTOR_CORE_PATH；
-2. 仓库内相对路径 Remastered/core/target/release/envdoctor_core.dll（开发模式）。
+2. 仓库内相对路径 Revamp/core/target/release/envdoctor_core.dll（开发模式）。
+
+GIL/线程约定：
+- `CDLL` 调用期间 ctypes 自动释放 GIL——Rust 引擎并发跑检查时 GUI 主线程不阻塞；
+- 进度回调由 ctypes 在引擎工作线程上调用，ctypes 回调进入 Python 前自动获取 GIL；
+  GUI/TUI 侧拿到回调后需再经 Qt 信号 / call_from_thread 切回界面线程。
 """
 
 from __future__ import annotations
@@ -15,6 +20,9 @@ import os
 from pathlib import Path
 
 _PROGRESS_CB = ctypes.CFUNCTYPE(None, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_char_p)
+
+# Rust 侧 panic 时让 stderr 带出完整调用栈（panic 被 catch_unwind 转为报告 error 字段，栈信息仅辅助调试）
+os.environ.setdefault("RUST_BACKTRACE", "1")
 
 
 class CoreNotAvailable(RuntimeError):
@@ -82,9 +90,12 @@ class Core:
         lib.envdoctor_run.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p]
         lib.envdoctor_run.restype = ctypes.c_void_p
         lib.envdoctor_string_free.argtypes = [ctypes.c_void_p]
+        lib.envdoctor_string_free.restype = None
         lib.envdoctor_cancel_new.restype = ctypes.c_void_p
         lib.envdoctor_cancel_trigger.argtypes = [ctypes.c_void_p]
+        lib.envdoctor_cancel_trigger.restype = None
         lib.envdoctor_cancel_free.argtypes = [ctypes.c_void_p]
+        lib.envdoctor_cancel_free.restype = None
 
     def version(self) -> str:
         return (self._lib.envdoctor_core_version() or b"?").decode()

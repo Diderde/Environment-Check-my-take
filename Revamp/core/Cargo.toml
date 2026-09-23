@@ -14,3 +14,6 @@ serde_json = "1"
 
 [profile.release]
 opt-level = 2
+# 保留符号与调试信息：便于在 gdb/lldb 中调试由 Python 进程加载的 Rust 代码；
+# C ABI 导出符号（#[no_mangle]）无论如何都不会被剥离
+strip = "none"
