@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! 硬件与系统检查：全部走 Windows API（FFI），不依赖已废弃的 wmic。
 
 use super::{CheckDef, CheckOut};

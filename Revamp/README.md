@@ -1,6 +1,6 @@
 # Environment Check · Revamp
 
-旧版「环境诊断工具」的Revamp版。原件（[`../Original File.py`](../Original File.py)）作为反面教材保留，
+旧版「环境诊断工具」的Revamp版。原件（[`../Original File.py`](../Original%20File.py)）作为反面教材保留，
 主要构成：**Rust 核心（C ABI）+ Typer CLI + Textual TUI + PySide6 GUI**。
 
 ## 架构

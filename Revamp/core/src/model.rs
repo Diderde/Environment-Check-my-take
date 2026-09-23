@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! 数据模型与配置（serde 序列化，JSON 为跨 ABI 的数据交换格式）。
 
 use serde::{Deserialize, Serialize};

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! 开发工具链检测：git/node/java/go/rust/gcc 等，表驱动。
 //!
 //! 未安装 ≠ 环境有病：默认报 info；只有通过 --require 声明为必备的工具，

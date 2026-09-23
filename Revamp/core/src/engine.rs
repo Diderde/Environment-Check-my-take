@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! 调度引擎：并发执行检查项、整体超时兜底、取消（generation 语义）、进度回调。
 //!
 //! 相对旧版的修复：

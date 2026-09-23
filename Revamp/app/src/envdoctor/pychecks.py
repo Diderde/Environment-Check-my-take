@@ -298,8 +298,19 @@ def py_check_defs() -> list[dict]:
     return defs
 
 
-def run_python_checks(cfg: dict, progress=None, done_offset: int = 0, total: int = 0) -> list[dict]:
-    """顺序执行 Python 侧检查（Rust 侧已并发跑完系统类检查）。"""
+def run_python_checks(
+    cfg: dict,
+    progress=None,
+    done_offset: int = 0,
+    total: int = 0,
+    categories: list[str] | None = None,
+) -> list[dict]:
+    """顺序执行 Python 侧检查（Rust 侧已并发跑完系统类检查）。
+
+    categories 不含 python 时直接返回空列表，避免白跑后被丢弃。
+    """
+    if categories is not None and PYTHON_CATEGORY not in categories:
+        return []
     results: list[dict] = []
     jobs = [(i, t, f) for i, t, f in _PY_CHECKS]
     for lib in _IMPORT_LIBS:

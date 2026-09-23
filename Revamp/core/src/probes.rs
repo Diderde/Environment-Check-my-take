@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! 底层探测工具：白名单工具表 + 带超时的子进程执行 + 字节解码。
 //!
 //! 安全设计：

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Diderde
+// SPDX-License-Identifier: MIT
+
 //! 检查项注册：CheckDef 定义 + 各领域模块汇总。
 
 pub mod containers;
