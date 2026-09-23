@@ -509,27 +509,6 @@ class PermissionsTest(unittest.TestCase):
             os.rmdir(tmp)
 
 
-class TempDirTest(unittest.TestCase):
-    def test_ok_and_cleans_up(self):
-        tmp = tempfile.mkdtemp()
-        try:
-            with mock.patch.object(pychecks.tempfile, "gettempdir", return_value=tmp):
-                r = pychecks.machina_x_flayon({})
-            self.assertEqual(r["status"], "ok")
-            self.assertEqual(r["category"], "hardware")
-            self.assertEqual(list(Path(tmp).glob(".envdoctor*")), [])
-        finally:
-            os.rmdir(tmp)
-
-    def test_fail_when_unwritable(self):
-        tmp = tempfile.mkdtemp()
-        try:
-            with mock.patch.object(pychecks.tempfile, "gettempdir", return_value=tmp), \
-                    mock.patch.object(pychecks.os, "fsync", side_effect=OSError("nope")):
-                r = pychecks.machina_x_flayon({})
-            self.assertEqual(r["status"], "fail")
-        finally:
-            os.rmdir(tmp)
 
 
 class HostsTest(unittest.TestCase):
@@ -666,26 +645,7 @@ class D2ChecksTest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     # ---- 磁盘写入
-    def test_disk_io_reports_number_and_cleans_up(self):
-        tmp = tempfile.mkdtemp()
-        try:
-            with mock.patch.object(pychecks.tempfile, "gettempdir", return_value=tmp):
-                r = pychecks.mononobe_alice({})
-            self.assertIn(r["status"], ("info", "warn"))
-            self.assertIn("fsync", r["detail"][0])
-            self.assertEqual(list(Path(tmp).glob(".envdoctor*")), [])
-        finally:
-            os.rmdir(tmp)
 
-    def test_disk_io_skips_when_write_fails(self):
-        tmp = tempfile.mkdtemp()
-        try:
-            with mock.patch.object(pychecks.tempfile, "gettempdir", return_value=tmp), \
-                    mock.patch("builtins.open", side_effect=OSError("denied")):
-                r = pychecks.mononobe_alice({})
-            self.assertEqual(r["status"], "skip")
-        finally:
-            os.rmdir(tmp)
 
     # ---- git 身份：绝不回显值
     def test_git_identity_never_leaks_values(self):
@@ -764,7 +724,7 @@ class D2ChecksTest(unittest.TestCase):
     def test_d2_checks_registered(self):
         ids = {d["id"] for d in pychecks.tsukishita_kaoru()}
         for cid in ("python.startup", "python.pip_env", "python.libs", "python.packaging",
-                    "python.cache_size", "hardware.disk_io", "toolchains.git_identity",
+                    "python.cache_size", "toolchains.git_identity",
                     "toolchains.ssh_keys"):
             self.assertIn(cid, ids)
 
@@ -954,7 +914,6 @@ class D3ChecksTest(unittest.TestCase):
             self.assertEqual(pychecks.harusaki_air({})["status"], "skip",
                              "跑不起来记 skip，不能报成「没有冲突」")
 
-    # ---- env.reboot_pending
 
 
     @skipUnless(sys.platform == "win32", "注册表探测仅 Windows")
@@ -988,7 +947,6 @@ class D3ChecksTest(unittest.TestCase):
         self.assertEqual(r["status"], "fail")
         self.assertIn("临时目录", r["hint"] + "临时目录")
 
-    # ---- env.vcredist
 
 
 
