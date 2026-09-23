@@ -8,10 +8,12 @@ import ctypes
 import io
 import json
 import os
+import ssl
 import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock, skipUnless
 
@@ -394,6 +396,219 @@ class BindingTest(unittest.TestCase):
         token.hyakuto_kyoko()
         # 取消后所有结果应为 SKIP
         self.assertTrue(all(r["status"] == "skip" for r in report["results"]))
+
+
+class MaskingTest(unittest.TestCase):
+    """报告不得出现用户名（主目录一律换成 %USERPROFILE%）。"""
+
+    def test_doris_masks_home_in_detail_hint_and_error(self):
+        home = os.path.expanduser("~")
+        r = pychecks._doris("env.demo", "T", "warn",
+                            [f"路径: {home}\\AppData\\Local\\Temp"],
+                            hint=f"看 {home}", error=f"err {home}")
+        blob = json.dumps(r, ensure_ascii=False)
+        self.assertNotIn(home, blob)
+        self.assertIn("%USERPROFILE%", blob)
+
+    def test_non_home_paths_pass_through(self):
+        r = pychecks._doris("env.demo", "T", "ok", [r"C:\Windows\System32"])
+        self.assertIn(r"C:\Windows\System32", r["detail"][0])
+
+
+class CategoryDerivationTest(unittest.TestCase):
+    """类别由 id 前缀推导：Python 侧可以承载任意类别的检查。"""
+
+    def test_category_from_id_prefix(self):
+        self.assertEqual(pychecks._doris("env.codepage", "T", "ok")["category"], "env")
+        self.assertEqual(pychecks._doris("hardware.cpu", "T", "ok")["category"], "hardware")
+        self.assertEqual(pychecks._doris("python.gil", "T", "ok")["category"], "python")
+        self.assertEqual(pychecks.tsukino_mito("network.hosts"), "network")
+
+    def test_py_check_defs_reports_real_categories(self):
+        cats = {d["category"] for d in pychecks.tsukishita_kaoru()}
+        self.assertTrue({"python", "env", "hardware", "network"} <= cats, cats)
+
+    def test_run_python_checks_filters_by_item_category(self):
+        # 关键回归：-c env 必须真的跑到 env 项（旧逻辑"categories 不含 python 就整体跳过"会返回空）
+        rows = pychecks.yatogami_fuma({}, categories=["env"])
+        self.assertTrue(rows)
+        self.assertTrue(all(r["category"] == "env" for r in rows), [r["category"] for r in rows])
+
+    def test_run_python_checks_unknown_category_is_empty(self):
+        self.assertEqual(pychecks.yatogami_fuma({}, categories=["nosuch"]), [])
+
+
+class PathValidityTest(unittest.TestCase):
+    def test_analyze_strips_quotes_and_dedupes(self):
+        raw = '"C:\\a";;C:\\a\\;C:\\missing'
+        r = pychecks.magni_dezmond(raw, ";", exists=lambda p: not p.endswith("missing"))
+        self.assertEqual(r["total"], 3)          # 空项被忽略
+        self.assertEqual(len(r["dupes"]), 1)     # 尾斜杠不同视为重复
+        self.assertEqual(r["invalid"], ["C:\\missing"])
+        self.assertGreater(r["saved"], 0)
+
+    def test_duplicate_key_is_case_and_slash_insensitive(self):
+        r = pychecks.magni_dezmond("C:\\Bin;C:\\bin\\;C:\\BIN", ";", exists=lambda _p: True)
+        self.assertEqual(len(r["dupes"]), 2)
+
+    def test_check_warns_on_invalid_entry(self):
+        with mock.patch.dict(os.environ, {"PATH": "Z:\\envdoctor-no-such-dir"}, clear=False):
+            r = pychecks.noir_vesper({})
+        self.assertEqual(r["status"], "warn")
+        self.assertEqual(r["category"], "env")
+
+    def test_check_ok_when_clean(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch.dict(os.environ, {"PATH": tmp}, clear=False):
+                r = pychecks.noir_vesper({})
+            self.assertEqual(r["status"], "ok")
+        finally:
+            os.rmdir(tmp)
+
+
+class CodepageTest(unittest.TestCase):
+    class _K32:
+        def __init__(self, cp):
+            self.cp = cp
+
+        def GetConsoleOutputCP(self):
+            return self.cp
+
+        def GetACP(self):
+            return 936
+
+    class _Windll:
+        def __init__(self, cp):
+            self.kernel32 = CodepageTest._K32(cp)
+
+    def _run(self, cp, stdout_enc):
+        fake = self._Windll(cp)
+        stub_out = type("S", (), {"encoding": stdout_enc})()
+        with mock.patch.object(pychecks.ctypes, "windll", fake), \
+                mock.patch.object(sys, "stdout", stub_out):
+            return pychecks.axel_syrios({})
+
+    def test_warns_when_output_encoding_is_not_utf8(self):
+        r = self._run(65001, "gbk")
+        self.assertEqual(r["status"], "warn")
+        self.assertEqual(r["category"], "env")
+        self.assertIn("PYTHONUTF8", r["hint"])
+
+    def test_ok_when_utf8(self):
+        self.assertEqual(self._run(65001, "utf-8")["status"], "ok")
+
+    def test_ok_when_utf8_mode_env(self):
+        with mock.patch.dict(os.environ, {"PYTHONUTF8": "1"}):
+            self.assertEqual(self._run(936, "cp936")["status"], "ok")
+
+
+class PermissionsTest(unittest.TestCase):
+    def test_ok_for_writable_dir(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch("sysconfig.get_paths", return_value={"purelib": tmp}):
+                r = pychecks.gavis_bettel({})
+            self.assertEqual(r["status"], "ok")
+            self.assertEqual(list(Path(tmp).glob(".envdoctor*")), [])
+        finally:
+            os.rmdir(tmp)
+
+    def test_warns_when_write_probe_fails(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch("sysconfig.get_paths", return_value={"purelib": tmp}), \
+                    mock.patch.object(Path, "write_text", side_effect=PermissionError("denied")):
+                r = pychecks.gavis_bettel({})
+            self.assertEqual(r["status"], "warn")
+            self.assertIn("venv", r["hint"])
+        finally:
+            os.rmdir(tmp)
+
+
+class TempDirTest(unittest.TestCase):
+    def test_ok_and_cleans_up(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch.object(pychecks.tempfile, "gettempdir", return_value=tmp):
+                r = pychecks.machina_x_flayon({})
+            self.assertEqual(r["status"], "ok")
+            self.assertEqual(r["category"], "hardware")
+            self.assertEqual(list(Path(tmp).glob(".envdoctor*")), [])
+        finally:
+            os.rmdir(tmp)
+
+    def test_fail_when_unwritable(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch.object(pychecks.tempfile, "gettempdir", return_value=tmp), \
+                    mock.patch.object(pychecks.os, "fsync", side_effect=OSError("nope")):
+                r = pychecks.machina_x_flayon({})
+            self.assertEqual(r["status"], "fail")
+        finally:
+            os.rmdir(tmp)
+
+
+class HostsTest(unittest.TestCase):
+    def test_summary_count_only_never_leaks_content(self):
+        text = ("# comment\n127.0.0.1 localhost\n"
+                "10.0.0.5 internal.corp.local\n"
+                "140.82.114.4 github.com\n")
+        r = pychecks.banzoin_hakka(text)
+        self.assertEqual(r["custom"], 3)
+        self.assertEqual(r["hot"], ["github.com"])
+        blob = json.dumps(r, ensure_ascii=False)
+        self.assertNotIn("internal.corp.local", blob, "不得回显映射内容")
+        self.assertNotIn("10.0.0.5", blob)
+
+    def test_gbk_hosts_does_not_crash(self):
+        raw = "# 中文注释\n127.0.0.1 localhost\n".encode("gbk")
+        self.assertIn("中文注释", pychecks._spade_echo(raw))
+
+
+class SslCheckTest(unittest.TestCase):
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def test_ok_on_success(self):
+        with mock.patch.object(pychecks.urllib.request, "urlopen", return_value=self._Resp()):
+            r = pychecks.jurard_t_rexford({})
+        self.assertEqual(r["status"], "ok")
+
+    def test_cert_failure_hints_mitm_proxy(self):
+        err = urllib.error.URLError(ssl.SSLCertVerificationError("unable to get local issuer"))
+        with mock.patch.object(pychecks.urllib.request, "urlopen", side_effect=err):
+            r = pychecks.jurard_t_rexford({})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("中间人代理", r["hint"])
+
+
+class CpuCheckTest(unittest.TestCase):
+    def test_registry_failure_degrades_to_info(self):
+        with mock.patch("winreg.OpenKey", side_effect=OSError("denied")), \
+                mock.patch.object(pychecks, "octavio", return_value=0):
+            r = pychecks.goldbullet({})
+        self.assertIn(r["status"], ("info", "ok"))
+        self.assertEqual(r["category"], "hardware")
+
+    def test_octavio_never_raises(self):
+        with mock.patch.object(pychecks.ctypes, "windll", type("W", (), {})()):
+            self.assertIsInstance(pychecks.octavio(), int)
+
+
+class ReportPrivacyTest(unittest.TestCase):
+    """对"无需联网"的新检查做一次整报告扫描：不得出现主目录字面量。"""
+
+    def test_report_contains_no_home_path(self):
+        home = os.path.expanduser("~")
+        rows = pychecks.yatogami_fuma({}, categories=["env", "hardware"])
+        blob = json.dumps(rows, ensure_ascii=False)
+        self.assertNotIn(home, blob)
+        self.assertTrue(any(r["id"] == "env.path_validity" for r in rows), [r["id"] for r in rows])
 
 
 if __name__ == "__main__":

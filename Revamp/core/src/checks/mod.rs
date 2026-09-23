@@ -83,9 +83,12 @@ mod tests {
 
     #[test]
     fn categories_are_from_known_set() {
-        let known: HashSet<&str> = ["hardware", "toolchains", "network", "containers", "databases"]
-            .into_iter()
-            .collect();
+        // 只校验 Rust 侧检查的类别；Python 侧另有同名类别（env/hardware/network 由 id 前缀决定）
+        let known: HashSet<&str> = [
+            "hardware", "toolchains", "network", "containers", "databases", "env",
+        ]
+        .into_iter()
+        .collect();
         for d in ookami_mio() {
             assert!(known.contains(d.category), "未知类别: {}", d.category);
         }

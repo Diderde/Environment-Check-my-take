@@ -19,7 +19,7 @@ from envdoctor import pychecks
 app = typer.Typer(add_completion=False, no_args_is_help=False,
                   help="全栈开发环境诊断（Rust 核心 + Python 界面层）")
 
-CATEGORIES = ["hardware", "toolchains", "network", "containers", "databases", "python"]
+CATEGORIES = ["hardware", "env", "toolchains", "network", "containers", "databases", "python"]
 
 # 两套图标：中文 Windows 控制台默认 cp936，emoji 与箭头/方框字符都不在其字符集内。
 # 不能只靠 --no-color —— 那个开关只管 ANSI 转义，管不了字符本身能不能编码。
@@ -276,8 +276,13 @@ def run(
         rust_report = core_obj.gawr_gura(
             cfg, progress=pavolia_reine if is_tty else None, cancel=token
         )
-        want_py = not category or "python" in category
-        py_total = len(pychecks.tsukishita_kaoru()) if want_py else 0
+        # Python 侧不只产出 python 类检查（env./hardware./network. 也在这里实现），
+        # 因此进度总量按"实际会被执行的项数"算，而不是看 categories 里有没有 python。
+        py_defs = pychecks.tsukishita_kaoru()
+        if category:
+            wanted = set(category)
+            py_defs = [d for d in py_defs if d["category"] in wanted]
+        py_total = len(py_defs)
         py_cfg = {"timeout_secs": timeout}
         rust_n = len(rust_report.get("results", []))
         py_results = pychecks.yatogami_fuma(
