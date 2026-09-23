@@ -894,7 +894,7 @@ class D3ChecksTest(unittest.TestCase):
                 "\n"
                 "C:\\libs\\a\n"
                 "import os; os.environ['X'] = '1'\n"
-                "exec(compile('1', '<s>', 'exec'))\n")
+                "exec __import__('sys').exit(0)\n")
         stat = pychecks.hassaku_yuzu(text)
         self.assertEqual(stat["paths"], 3)
         self.assertEqual(stat["executable"], 2)
