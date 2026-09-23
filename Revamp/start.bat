@@ -129,29 +129,29 @@ pause
 exit /b 0
 
 :loading
-rem 5s fake-loading: one phrase per line, filled-block progress bar (unrolled)
+rem ~5s fake loading: progress bar first, then percent, then the phrase (unrolled)
 setlocal
 set "PHRASES=Spelunking......;Moving bricks......;Enbugging......;Caveman Debugging......;Breading crumbs......;Rubber Duck Debugging......;Bribing the hamster......;Whatchamacalliting......;Flibbertigibbrting......;Deep Sleeping....."
-echo Spelunking...... [¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 10%%
+echo [¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 10%% Spelunking......
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Moving bricks...... [¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 20%%
+echo [¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 20%% Moving bricks......
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Enbugging...... [¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 30%%
+echo [¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 30%% Enbugging......
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Caveman Debugging...... [¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 40%%
+echo [¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 40%% Caveman Debugging......
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Breading crumbs...... [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 50%%
+echo [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 50%% Breading crumbs......
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Rubber Duck Debugging...... [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 60%%
+echo [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ¡õ¡õ] 60%% Rubber Duck Debugging......
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Bribing the hamster...... [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ] 70%%
+echo [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ¡õ¡õ] 70%% Bribing the hamster......
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Whatchamacalliting...... [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ] 80%%
+echo [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ¡õ¡õ] 80%% Whatchamacalliting......
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Flibbertigibbrting...... [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ] 90%%
+echo [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¡õ¡õ] 90%% Flibbertigibbrting......
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Deep Sleeping..... [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€] 100%%
+echo [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€] 100%% Deep Sleeping.....
 ping -n 1 -w 450 192.0.2.1 >nul
-echo Loaded. [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€] 100%%
+echo [¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€] 100%% Loaded.
 endlocal
 exit /b 0
