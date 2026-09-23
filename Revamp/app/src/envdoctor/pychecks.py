@@ -392,56 +392,6 @@ def axel_syrios(_cfg: dict) -> dict:
     )
 
 
-def magni_dezmond(raw: str, sep: str, exists=None) -> dict:
-    """纯函数：分析 PATH 字符串（剥引号、忽略空项）。
-
-    "重复"的判定键是 `p.rstrip("\\/").lower()` —— 实测本机重复项里存在"仅尾斜杠不同"的形态。
-    返回条目数、失效项、重复项、原长度与去重后可缩短的字符数。
-    """
-    exists = exists or os.path.exists
-    items = [p.strip().strip('"') for p in raw.split(sep)]
-    items = [p for p in items if p]
-    seen: set[str] = set()
-    invalid: list[str] = []
-    dupes: list[str] = []
-    for p in items:
-        key = p.rstrip("\\/").lower()
-        if key in seen:
-            dupes.append(p)
-        else:
-            seen.add(key)
-        if not exists(p):
-            invalid.append(p)
-    unique = list(dict.fromkeys(p.rstrip("\\/") for p in items))
-    return {
-        "total": len(items), "invalid": invalid, "dupes": dupes,
-        "length": len(raw), "saved": max(0, len(raw) - len(sep.join(unique))),
-    }
-
-
-def noir_vesper(_cfg: dict) -> dict:
-    """env.path_validity：PATH 里的失效目录与重复条目。"""
-    raw = os.environ.get("PATH", "")
-    r = magni_dezmond(raw, os.pathsep)
-    if not r["total"]:
-        return _doris("env.path_validity", "PATH 有效性", "skip", ["PATH 为空"])
-    detail = [f"条目 {r['total']} 个，共 {r['length']} 字符"]
-    if r["dupes"]:
-        detail.append(f"重复条目 {len(r['dupes'])} 个（去重可缩短约 {r['saved']} 字符）")
-    if r["invalid"]:
-        detail.append(f"失效目录 {len(r['invalid'])} 个:")
-        detail += [f"  {p}" for p in r["invalid"][:5]]
-        if len(r["invalid"]) > 5:
-            detail.append(f"  …另有 {len(r['invalid']) - 5} 个未列出")
-    if r["invalid"] or r["dupes"]:
-        return _doris(
-            "env.path_validity", "PATH 有效性", "warn", detail,
-            hint="失效目录会让命令解析变慢、并掩盖真正的安装位置；重复项多由安装器反复追加，"
-                 "建议清理系统/用户 PATH",
-        )
-    return _doris("env.path_validity", "PATH 有效性", "ok", detail)
-
-
 def gavis_bettel(_cfg: dict) -> dict:
     """python.permissions：site-packages 是否真的可写（写入探针），以及管理员状态。
 
@@ -949,35 +899,6 @@ def fushimi_gaku(_cfg: dict) -> dict:
     return _doris("toolchains.ssh_keys", "SSH 密钥", "info", detail)
 
 
-def fumino_tamaki(root: int, path: str, name: str):
-    """读一个注册表值：只读，且显式带 KEY_WOW64_64KEY。
-
-    原件正是漏了这个标志，32 位解释器只能看到 WOW6432Node 视图、漏掉 64 位安装。
-    """
-    import winreg
-    flags = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0)
-    with winreg.OpenKey(root, path, 0, flags) as k:
-        return winreg.QueryValueEx(k, name)[0]
-
-
-def gilzaren_iii(_cfg: dict) -> dict:
-    """env.longpaths：长路径支持是否开启（深层依赖目录的经典坑）。"""
-    if sys.platform != "win32":
-        return _doris("env.longpaths", "长路径支持", "skip", ["仅 Windows"])
-    import winreg
-    try:
-        val = fumino_tamaki(winreg.HKEY_LOCAL_MACHINE,
-                            r"SYSTEM\CurrentControlSet\Control\FileSystem", "LongPathsEnabled")
-    except OSError as e:
-        return _doris("env.longpaths", "长路径支持", "skip",
-                      [f"读取注册表失败（winerror={getattr(e, 'winerror', '?')}）"])
-    if int(val) == 1:
-        return _doris("env.longpaths", "长路径支持", "ok", ["LongPathsEnabled = 1"])
-    return _doris("env.longpaths", "长路径支持", "warn", ["LongPathsEnabled = 0"],
-                  hint="未开启长路径：深层依赖目录（Node/Python 包）会因路径超长报错；"
-                       "可在组策略或注册表开启后重开终端")
-
-
 # ---------------------------------------------------------------- 完整性与生态陷阱（D3）
 #
 # 这一批的共同点：结论必须"可行动"，且**取数与判定分离**——判定写成纯函数或用可注入参数，
@@ -1262,55 +1183,7 @@ def harusaki_air(cfg: dict) -> dict:
     )
 
 
-def kanda_shoichi(root: int, path: str, name: str | None = None) -> bool:
-    """只读探测：注册表键（或键下的某个值）是否存在。
-
-    "不存在"是**正常结果**而不是错误，所以单独做一个布尔探针——`fumino_tamaki` 会抛
-    OSError，调用方就得为"没装/没重启"写异常分支，容易把正常状态写成失败。
-    """
-    import winreg
-    flags = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0)
-    try:
-        with winreg.OpenKey(root, path, 0, flags) as k:
-            if name is None:
-                return True
-            winreg.QueryValueEx(k, name)
-            return True
-    except OSError:
-        return False
-
-
 # (说明, 注册表路径, 值名/None 表示"看这个键在不在")
-_REBOOT_PROBES: tuple[tuple[str, str, str | None], ...] = (
-    ("待重命名的文件（安装器/驱动遗留）",
-     r"SYSTEM\CurrentControlSet\Control\Session Manager", "PendingFileRenameOperations"),
-    ("Windows 更新待重启",
-     r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired", None),
-    ("组件服务(CBS) 待重启",
-     r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending", None),
-)
-
-
-def amemori_sayo(_cfg: dict) -> dict:
-    """env.reboot_pending：装完更新/驱动之后是否还没重启。
-
-    三处标记都是"只读查询"：任一存在就说明系统处于半完成状态——安装程序会因为目标文件
-    被占用而失败，编译工具链也可能报找不到刚更新的 DLL。
-    """
-    id_, title = "env.reboot_pending", "待重启状态"
-    if sys.platform != "win32":
-        return _doris(id_, title, "skip", ["仅 Windows"])
-    import winreg
-    hits = [label for label, path, name in _REBOOT_PROBES
-            if kanda_shoichi(winreg.HKEY_LOCAL_MACHINE, path, name)]
-    if not hits:
-        return _doris(id_, title, "ok", ["三处待重启标记均不存在"])
-    return _doris(
-        id_, title, "warn",
-        [f"命中 {len(hits)} 项:"] + [f"  {h}" for h in hits],
-        hint="系统更新/驱动装完还没重启：安装程序会因文件被占用而失败，工具链也可能找不到刚更新的组件；"
-             "建议先重启一次再继续搭建环境",
-    )
 
 
 def takamiya_rion(temp: str, tmp: str, exists: bool, writable: bool,
@@ -1363,66 +1236,6 @@ def asuka_hina(_cfg: dict) -> dict:
                 pass
     status_, detail, hint = takamiya_rion(temp, tmp, exists, writable)
     return _doris(id_, title, status_, detail, hint=hint)
-
-
-_VCREDIST_KEY = r"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
-_VCREDIST_FIELDS = ("Installed", "Version", "Major", "Minor", "Bld", "Rbld")
-
-
-def maimoto_keisuke(values: dict) -> str:
-    """纯函数：把 vcredist 的注册表值拼成可读版本号。
-
-    注册表里的 `Version` 通常已是现成字符串（`v14.40.33810.00`），但并非所有版本都写；
-    缺失时按 Major/Minor/Bld/Rbld 四个分量拼，拼不出来就返回空串（调用方只报"已安装"）。
-    """
-    version = str(values.get("Version", "") or "").strip()
-    if version:
-        return version if version.startswith("v") else f"v{version}"
-    parts = [values.get(k) for k in ("Major", "Minor", "Bld", "Rbld")]
-    if any(not isinstance(p, int) for p in parts):
-        return ""
-    return "v{}.{}.{}.{}".format(*parts)
-
-
-def debidebi_debiru() -> dict:
-    """只读探测：VC++ 运行库（x64）的注册表状态；返回 `{}` 表示该键整个不存在。
-
-    复用 `fumino_tamaki`（它显式带 `KEY_WOW64_64KEY`）：少了这个标志，32 位解释器只能看到
-    WOW6432Node 视图，64 位运行库会被整个漏掉。
-    """
-    import winreg
-    out: dict = {}
-    for field in _VCREDIST_FIELDS:
-        try:
-            out[field] = fumino_tamaki(winreg.HKEY_LOCAL_MACHINE, _VCREDIST_KEY, field)
-        except OSError:
-            continue
-    return out
-
-
-def rindou_mikoto(_cfg: dict) -> dict:
-    """env.vcredist：VC++ 运行库是否已装（缺 VCRUNTIME140.dll 的经典报错）。"""
-    id_, title = "env.vcredist", "VC++ 运行库"
-    if sys.platform != "win32":
-        return _doris(id_, title, "skip", ["仅 Windows"])
-    values = debidebi_debiru()
-    detail: list[str] = []
-    if values:
-        version = maimoto_keisuke(values)
-        detail.append("注册表记录: " + ("已安装" if values.get("Installed") else "未标记已安装")
-                      + (f" {version}" if version else ""))
-    else:
-        detail.append("注册表未找到 x64 运行库记录")
-    dll = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "vcruntime140.dll"
-    has_dll = dll.is_file()
-    detail.append(f"System32\\vcruntime140.dll: {'存在' if has_dll else '不存在'}")
-    if values.get("Installed") or has_dll:
-        return _doris(id_, title, "ok", detail)
-    return _doris(
-        id_, title, "warn", detail,
-        hint="很多工具（Python 扩展、Node 原生模块、C++ 命令行工具）会报缺少 VCRUNTIME140.dll；"
-             "装一次 Microsoft Visual C++ 2015-2022 可再发行组件包（x64）即可",
-    )
 
 
 def joe_rikiichi(java_home: str, on_path: str, home_java: str,
@@ -2021,8 +1834,6 @@ _PY_CHECKS = [
     ("python.packaging", "打包工具", suzuya_aki),
     ("python.cache_size", "字节码缓存", ienaga_mugi),
     ("env.codepage", "控制台编码", axel_syrios),
-    ("env.path_validity", "PATH 有效性", noir_vesper),
-    ("env.longpaths", "长路径支持", gilzaren_iii),
     ("hardware.cpu", "CPU", goldbullet),
     ("hardware.temp", "临时目录", machina_x_flayon),
     ("hardware.disk_io", "磁盘写入", mononobe_alice),
@@ -2033,9 +1844,7 @@ _PY_CHECKS = [
     ("python.shadowing", "模块遮蔽", umiyashano_kami),
     ("python.pth_files", ".pth 路径注入", izumo_kasumi),
     ("python.pip_check", "依赖冲突", harusaki_air),
-    ("env.reboot_pending", "待重启状态", amemori_sayo),
     ("env.temp_path", "临时目录路径", asuka_hina),
-    ("env.vcredist", "VC++ 运行库", rindou_mikoto),
     ("toolchains.java_home", "JAVA_HOME 一致性", machita_chima),
     ("toolchains.git_config", "Git 关键配置", belmond_banderas),
     ("self.abi", "核心 ABI 自检", yumeoi_kakeru),
