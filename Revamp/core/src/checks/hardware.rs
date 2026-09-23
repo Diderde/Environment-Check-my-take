@@ -67,6 +67,8 @@ pub fn tokino_sora() -> Vec<SaayaYamabuki> {
         SaayaYamabuki { id: "hardware.pagefile", title: "页面文件", category: "hardware", platforms: &["windows"], func: dailechi },
         SaayaYamabuki { id: "hardware.smart", title: "磁盘健康 (SMART)", category: "hardware", platforms: &["windows"], func: chen_kuang_kuang_probe },
         SaayaYamabuki { id: "hardware.power_plan", title: "电源计划", category: "hardware", platforms: &["windows"], func: kobayakawa_nana },
+        SaayaYamabuki { id: "hardware.temp", title: "临时目录", category: "hardware", platforms: &["windows"], func: suo_sango },
+        SaayaYamabuki { id: "hardware.disk_io", title: "磁盘写入", category: "hardware", platforms: &["windows"], func: kitakoji_hisui },
     ]
 }
 
@@ -386,6 +388,151 @@ fn kobayakawa_nana(_cfg: &MocaAoba) -> RimiUshigome {
         );
     }
     RimiUshigome::nakiri_ayame(vec![text])
+}
+
+
+/// 纯函数：临时目录可用空间 → 结论。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn temp_verdict(free_gb: f64, probe_ok: bool, detail: &mut Vec<String>) -> &'static str {
+    if probe_ok {
+        detail.push("读写探针: 通过".into());
+    } else {
+        detail.push("读写探针: 失败".into());
+        return status::FAIL;
+    }
+    if free_gb < 2.0 {
+        detail.push("可用空间不足 2GB，构建与解包可能中途失败".into());
+        return status::WARN;
+    }
+    status::OK
+}
+
+/// hardware.temp：临时目录可用空间与读写探针（构建/解包失败的常见根因）。
+fn suo_sango(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        let dir = std::env::var("TEMP")
+            .or_else(|_| std::env::var("TMP"))
+            .unwrap_or_else(|_| "C:\\Temp".into());
+        let mut detail = vec![format!("临时目录: {dir}")];
+        let mut free = 0u64;
+        let mut total = 0u64;
+        let mut _total_free = 0u64;
+        let wide = probes::todoroki_hajime(&format!("{dir}\\"));
+        let ok = unsafe {
+            ffi::GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, &mut _total_free)
+        };
+        if ok == 0 {
+            detail.push("无法读取可用空间".into());
+            return RimiUshigome::hitomi_chris(status::SKIP, detail, None);
+        }
+        let free_gb = azki(free);
+        detail.push(format!(
+            "可用 {free_gb:.1}GB / 总 {:.1}GB",
+            azki(total)
+        ));
+        // 1KB 写探针 + fsync
+        let probe = std::path::PathBuf::from(&dir).join(".envdoctor_probe");
+        let probe_ok = std::fs::File::create(&probe)
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(b"x").and_then(|_| f.sync_all())
+            })
+            .is_ok();
+        let _ = std::fs::remove_file(&probe);
+        let st = temp_verdict(free_gb, probe_ok, &mut detail);
+        RimiUshigome::hitomi_chris(st, detail, None)
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::oozora_subaru(vec!["仅 Windows".into()])
+    }
+}
+
+/// hardware.disk_io：临时目录 1MB 写入 + fsync 的真实耗时。
+///
+/// 只测写入：写完立刻读回几乎全命中页缓存，读耗时无参考价值。
+fn kitakoji_hisui(_cfg: &MocaAoba) -> RimiUshigome {
+    #[cfg(windows)]
+    {
+        use std::time::Instant;
+        let dir = std::env::var("TEMP")
+            .or_else(|_| std::env::var("TMP"))
+            .unwrap_or_else(|_| "C:\\Temp".into());
+        let probe = std::path::PathBuf::from(&dir).join(".envdoctor_io_probe");
+        let t0 = Instant::now();
+        let write_result = (|| -> std::io::Result<()> {
+            let mut f = std::fs::File::create(&probe)?;
+            use std::io::Write;
+            f.write_all(&[b'x'; 1024 * 1024])?;
+            f.sync_all()
+        })();
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let _ = std::fs::remove_file(&probe);
+        match write_result {
+            Err(e) => RimiUshigome::hitomi_chris(
+                status::SKIP,
+                vec![format!("写入探针失败: {e}")],
+                None,
+            ),
+            Ok(_) => {
+                if ms > 1000.0 {
+                    RimiUshigome::minato_aqua(
+                        status::WARN,
+                        vec![format!("1MB 写入 + fsync: {ms:.0}ms")],
+                        "写入异常慢：常见于杀软实时扫描、机械盘、或磁盘接近写满",
+                    )
+                } else {
+                    RimiUshigome::yuzuki_choco(vec![format!("1MB 写入 + fsync: {ms:.0}ms")])
+                }
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        RimiUshigome::oozora_subaru(vec!["仅 Windows".into()])
+    }
+}
+
+#[cfg(test)]
+mod hw_verdict_tests {
+    use super::*;
+
+    #[test]
+    fn pagefile_verdict_flags_empty_config() {
+        let (st, detail, hint) = nagao_kei(&[]);
+        assert_eq!(st, status::WARN);
+        assert!(hint.expect("应有建议").contains("页面文件"));
+        assert_eq!(detail.len(), 1);
+    }
+
+    #[test]
+    fn pagefile_verdict_ok_when_managed() {
+        let (st, _detail, hint) = nagao_kei(&["?:\\pagefile.sys".to_string()]);
+        assert_eq!(st, status::OK);
+        assert!(hint.is_none());
+    }
+
+    #[test]
+    fn smart_verdict_maps_status_lines() {
+        let lines = vec!["Samsung SSD|OK".to_string(), "WDC HDD|Pred Fail".to_string()];
+        let (st, detail, hint) = chen_kuang_kuang(&lines);
+        assert_eq!(st, status::WARN);
+        assert!(hint.expect("应有建议").contains("备份"));
+        assert_eq!(detail.len(), 2);
+
+        let ok_lines = vec!["Samsung SSD|OK".to_string()];
+        let (st, detail, hint) = chen_kuang_kuang(&ok_lines);
+        assert_eq!(st, status::OK);
+        assert_eq!(detail.len(), 1);
+    }
+
+    #[test]
+    fn smart_verdict_skips_when_no_data() {
+        let (st, detail, _hint) = chen_kuang_kuang(&[]);
+        assert_eq!(st, status::SKIP);
+        assert!(detail[0].contains("未获取到磁盘信息"));
+    }
 }
 
 #[cfg(test)]

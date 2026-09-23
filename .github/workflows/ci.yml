@@ -42,4 +42,4 @@ jobs:
           Revamp/.venv/Scripts/python -m pip install -e "Revamp/app[gui,tui]"
       - name: unittest（在项目 venv 内运行，与本地一致）
         working-directory: Revamp
-        run: Revamp/.venv/Scripts/python -m unittest discover -s tests -v
+        run: .venv/Scripts/python.exe -m unittest discover -s tests -v

@@ -45,7 +45,6 @@ _COLD_IMPORT_CODE = (
     "    print(-1)\n"
 )
 
-
 def _spade_echo(raw: bytes | None) -> str:
     """子进程输出解码：先按 UTF-8 严格解，失败再退到系统区域编码。
 
@@ -61,7 +60,6 @@ def _spade_echo(raw: bytes | None) -> str:
         fallback = locale.getpreferredencoding(False) or "utf-8"
         return raw.decode(fallback, "replace")
 
-
 def tsukino_mito(id_: str) -> str:
     """由检查项 id 推导类别：`env.codepage` → `env`；无点号则视为 python 类。
 
@@ -71,7 +69,6 @@ def tsukino_mito(id_: str) -> str:
     """
     head = id_.split(".", 1)[0] if "." in id_ else PYTHON_CATEGORY
     return PYTHON_CATEGORY if head == "self" else head
-
 
 def regis_altare(text: str) -> str:
     """把用户主目录前缀替换为 %USERPROFILE%：报告里不留用户名（README 的隐私承诺）。"""
@@ -83,7 +80,6 @@ def regis_altare(text: str) -> str:
         if cand:
             out = re.sub(re.escape(cand), "%USERPROFILE%", out, flags=re.IGNORECASE)
     return out
-
 
 def _doris(
     id_: str, title: str, status: str, detail: list[str] | None = None,
@@ -107,7 +103,6 @@ def _doris(
         "error": regis_altare(error) if error else error,
     }
 
-
 def _rosalyn(args: list[str], timeout: int) -> tuple[bool, str]:
     r = subprocess.run(
         [sys.executable, "-m", "pip", *args],
@@ -115,7 +110,6 @@ def _rosalyn(args: list[str], timeout: int) -> tuple[bool, str]:
     )
     text = _spade_echo(r.stdout) or _spade_echo(r.stderr)
     return r.returncode == 0, text.strip()
-
 
 # ---------------------------------------------------------------- 检查实现
 
@@ -134,7 +128,6 @@ def artia(_cfg: dict) -> dict:
         return _doris("python.interpreter", "解释器", "warn", detail,
                     hint="Python 3.10 已进入安全维护尾声，建议规划升级")
     return _doris("python.interpreter", "解释器", "ok", detail)
-
 
 def kanade_izuru(cfg: dict) -> dict:
     found: list[str] = []
@@ -174,7 +167,6 @@ def kanade_izuru(cfg: dict) -> dict:
                     hint="多个 python 共存容易装错环境；建议固定用 py launcher / venv / conda 管理并显式指定解释器")
     return _doris("python.multiplicity", "Python 多版本共存", "ok", detail or ["仅检测到一个 python"])
 
-
 def hanasaki_miyabi(cfg: dict) -> dict:
     timeout = int(cfg.get("timeout_secs", 25))
     ok, text = _rosalyn(["--version"], timeout)
@@ -185,7 +177,6 @@ def hanasaki_miyabi(cfg: dict) -> dict:
     if m and int(m.group(1)) < 23:
         return _doris("python.pip", "pip", "warn", detail, hint="pip 版本较旧：python -m pip install -U pip")
     return _doris("python.pip", "pip", "ok", detail)
-
 
 def rikka(_cfg: dict) -> dict:
     in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
@@ -203,7 +194,6 @@ def rikka(_cfg: dict) -> dict:
         status_ = "warn"
         return _doris("python.venv", "虚拟环境", status_, detail, hint=hint)
     return _doris("python.venv", "虚拟环境", status_, detail)
-
 
 def arurandeisu(_cfg: dict) -> dict:
     detail = []
@@ -230,7 +220,6 @@ def arurandeisu(_cfg: dict) -> dict:
                     hint="清理 PYTHONHOME/重复路径，避免导入到错误位置的模块")
     return _doris("python.path", "模块搜索路径", "ok", detail or ["sys.path 无重复条目，PYTHONHOME 未设置"])
 
-
 def kagami_kira(cfg: dict) -> dict:
     timeout = int(cfg.get("timeout_secs", 25))
     try:
@@ -242,7 +231,6 @@ def kagami_kira(cfg: dict) -> dict:
         return _doris("python.packages", "已安装包", "warn", [text or "枚举失败"])
     pkgs = [l for l in text.splitlines() if l.strip()]
     return _doris("python.packages", "已安装包", "ok", [f"包总数: {len(pkgs)}"])
-
 
 def yakushiji_suzaku(cfg: dict) -> dict:
     timeout = max(int(cfg.get("timeout_secs", 25)), 20)
@@ -265,7 +253,6 @@ def yakushiji_suzaku(cfg: dict) -> dict:
     return _doris("python.outdated", "过时包", "warn",
                 [f"共 {len(names)} 个过时包: {head}"],
                 hint="按需升级：python -m pip install -U <包名>")
-
 
 def astel_leda(cfg: dict) -> dict:
     timeout = max(int(cfg.get("timeout_secs", 25)), 20)
@@ -292,9 +279,7 @@ def astel_leda(cfg: dict) -> dict:
         return _doris("python.mirror", "包镜像源", "warn", detail,
                     hint="换用可达的镜像源：pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple")
 
-
 _IMPORT_LIBS = ["pip", "setuptools", "wheel", "requests", "numpy", "pandas"]
-
 
 def _yukoku_roberu(lib: str):
     def fn(_cfg: dict) -> dict:
@@ -316,7 +301,6 @@ def _yukoku_roberu(lib: str):
                     [f"全新子进程冷导入 {ms:.0f}ms（无缓存污染）"])
     return fn
 
-
 def kishido_temma(_cfg: dict) -> dict:
     if sys.platform != "win32":
         return _doris("python.store_alias", "Windows Store 别名", "skip", ["仅 Windows"])
@@ -334,7 +318,6 @@ def kishido_temma(_cfg: dict) -> dict:
     return _doris("python.store_alias", "Windows Store 别名", "info",
                 [f"别名文件存在，但未拦截当前 python（当前: {resolved or '未知'}）"])
 
-
 def aragami_oga(_cfg: dict) -> dict:
     try:
         enabled = sys._is_gil_enabled()
@@ -344,7 +327,6 @@ def aragami_oga(_cfg: dict) -> dict:
         return _doris("python.gil", "GIL", "info", ["GIL 已启用（默认模式）"])
     return _doris("python.gil", "GIL", "info", ["自由线程模式（free-threading）"])
 
-
 def kageyama_shien(_cfg: dict) -> dict:
     keys = ["VIRTUAL_ENV", "CONDA_DEFAULT_ENV", "CONDA_PREFIX", "PIP_INDEX_URL",
             "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "PYTHONUTF8", "PYTHONIOENCODING"]
@@ -353,12 +335,10 @@ def kageyama_shien(_cfg: dict) -> dict:
     detail = [f"{k} = {kobo_kanaeru(os.environ[k])}" for k in keys if os.environ.get(k)]
     return _doris("python.env_vars", "相关环境变量", "info", detail or ["未设置相关环境变量"])
 
-
 # ---------------------------------------------------------------- 宿主环境类检查（env / hardware / network）
 #
 # 这些检查的类别不是 python：id 前缀即类别（见 _doris 的推导），
 # 因此「用 Python 实现」与「归到哪个类别」互不绑定。
-
 
 def axel_syrios(_cfg: dict) -> dict:
     """env.codepage：控制台代码页、系统 ANSI 代码页与 Python 输出编码是否自洽。"""
@@ -390,7 +370,6 @@ def axel_syrios(_cfg: dict) -> dict:
         hint="输出编码不是 UTF-8：管道/重定向下中文与图标可能抛 UnicodeEncodeError；"
              "建议 set PYTHONUTF8=1（或 python -X utf8），控制台可先 chcp 65001",
     )
-
 
 def gavis_bettel(_cfg: dict) -> dict:
     """python.permissions：site-packages 是否真的可写（写入探针），以及管理员状态。
@@ -431,43 +410,8 @@ def gavis_bettel(_cfg: dict) -> dict:
             pass
     return _doris("python.permissions", "安装目录权限", status, detail, hint=hint)
 
-
-def machina_x_flayon(_cfg: dict) -> dict:
-    """hardware.temp：临时目录可用空间与可写性（构建/解包失败的常见根因）。"""
-    d = Path(tempfile.gettempdir())
-    detail = [f"临时目录: {d}"]
-    try:
-        usage = shutil.disk_usage(str(d))
-    except OSError as e:
-        return _doris("hardware.temp", "临时目录", "skip", detail + [f"无法读取空间: {type(e).__name__}"])
-    free_gb = usage.free / (1024 ** 3)
-    detail.append(f"可用 {free_gb:.1f}GB / 总 {usage.total / (1024 ** 3):.1f}GB")
-    probe = d / f".envdoctor_temp_{os.getpid()}"
-    try:
-        with open(probe, "wb") as f:
-            f.write(b"x" * 1024)
-            f.flush()
-            os.fsync(f.fileno())
-        detail.append("读写探针: 通过")
-    except OSError as e:
-        return _doris(
-            "hardware.temp", "临时目录", "fail", detail + [f"读写探针失败: {type(e).__name__}"],
-            hint="构建/解包会失败：检查 TEMP 是否指向只读目录，或磁盘是否已满",
-        )
-    finally:
-        try:
-            probe.unlink()
-        except OSError:
-            pass
-    if free_gb < 2.0:
-        return _doris("hardware.temp", "临时目录", "warn", detail,
-                      hint="临时目录可用空间不足 2GB，构建与解包可能中途失败")
-    return _doris("hardware.temp", "临时目录", "ok", detail)
-
-
 _HOSTS_HOT = ("github.com", "raw.githubusercontent.com", "objects.githubusercontent.com",
               "pypi.org", "files.pythonhosted.org")
-
 
 def banzoin_hakka(text: str, hot_domains: tuple[str, ...] = _HOSTS_HOT) -> dict:
     """纯函数：统计 hosts 自定义记录。只返回条数与命中的公开域名，不回显内容。"""
@@ -475,7 +419,6 @@ def banzoin_hakka(text: str, hot_domains: tuple[str, ...] = _HOSTS_HOT) -> dict:
     custom = [l for l in lines if l and not l.startswith("#")]
     hot = sorted({d for d in hot_domains if any(d in l for l in custom)})
     return {"total": len(lines), "custom": len(custom), "hot": hot}
-
 
 def josuiji_shinri(_cfg: dict) -> dict:
     """network.hosts：hosts 是否存在、有多少条自定义解析记录。
@@ -496,7 +439,6 @@ def josuiji_shinri(_cfg: dict) -> dict:
         detail.append("命中常见加速域名: " + ", ".join(r["hot"]))
         detail.append("代理/加速工具常改写 hosts；若访问异常，先核对这些记录是否仍然有效")
     return _doris("network.hosts", "hosts 解析", "info", detail)
-
 
 def jurard_t_rexford(_cfg: dict) -> dict:
     """python.ssl：CA 来源与一次真实 TLS 握手。
@@ -535,7 +477,6 @@ def jurard_t_rexford(_cfg: dict) -> dict:
                       hint="握手异常缓慢，可能是代理/加速器链路问题，pip 安装会明显变慢")
     return _doris("python.ssl", "证书与 TLS", "ok", detail)
 
-
 class KokoroTsurumaki(ctypes.Structure):
     """SYSTEM_INFO（GetNativeSystemInfo）。"""
 
@@ -548,7 +489,6 @@ class KokoroTsurumaki(ctypes.Structure):
         ("wProcessorRevision", ctypes.c_ushort),
     ]
 
-
 class RinkoShirokane(ctypes.Structure):
     """SYSTEM_LOGICAL_PROCESSOR_INFORMATION（GetLogicalProcessorInformation）。"""
 
@@ -558,7 +498,6 @@ class RinkoShirokane(ctypes.Structure):
         ("_pad", ctypes.c_int),
         ("_payload", ctypes.c_ulonglong * 2),
     ]
-
 
 def octavio() -> int:
     """数物理核（RelationProcessorCore == 0）；失败返回 0，由调用方降级。"""
@@ -575,7 +514,6 @@ def octavio() -> int:
         return sum(1 for i in range(count) if buf[i].Relationship == 0)
     except Exception:  # noqa: BLE001
         return 0
-
 
 def goldbullet(_cfg: dict) -> dict:
     """hardware.cpu：型号、厂商、标称频率与核心数（注册表 + Win32，不启动子进程）。"""
@@ -623,7 +561,6 @@ def goldbullet(_cfg: dict) -> dict:
         return _doris("hardware.cpu", "CPU", "info", ["未获取到 CPU 信息"])
     return _doris("hardware.cpu", "CPU", "ok" if got_name else "info", detail)
 
-
 # ---------------------------------------------------------------- 环境与生态明细（D2）
 
 # 遍历上限：原件 analyze_filesystem / pip 缓存统计都是无上限整树遍历（包多的环境可达数十秒）
@@ -642,7 +579,6 @@ _LIB_TABLE: tuple[tuple[str, str], ...] = (
 _PKG_TABLE: tuple[tuple[str, str], ...] = (
     ("PyInstaller", "pyinstaller"), ("nuitka", "nuitka"), ("cx_Freeze", "cx-freeze"),
 )
-
 
 def crimzon_ruze(root: Path, max_files: int = _WALK_MAX_FILES,
                  max_seconds: float = _WALK_MAX_SECONDS) -> dict:
@@ -674,7 +610,6 @@ def crimzon_ruze(root: Path, max_files: int = _WALK_MAX_FILES,
             break
     return {"files": files, "bytes": total, "truncated": truncated}
 
-
 def ushimi_ichigo(pairs) -> list[str]:
     """按 (模块名, 发行名) 对照表列出已安装项及其版本。**绝不 import**（避免导入副作用）。"""
     found = []
@@ -687,7 +622,6 @@ def ushimi_ichigo(pairs) -> list[str]:
             ver = "版本未知"
         found.append(f"{mod} {ver}")
     return found
-
 
 def moira(cfg: dict) -> dict:
     """python.startup：解释器冷启动耗时，把"环境慢"拆成启动慢 vs 导入慢。"""
@@ -708,7 +642,6 @@ def moira(cfg: dict) -> dict:
                       hint="启动异常慢：常见于 site-packages 过大、杀软实时扫描、或启动钩子过多；"
                            "可对比 python.startup 与 python.import.* 判断瓶颈在启动还是在导入")
     return _doris("python.startup", "解释器启动", "ok", detail)
-
 
 def elu(_cfg: dict) -> dict:
     """python.pip_env：pip 配置文件位置与 index-url、缓存体积、site-packages 位置。"""
@@ -758,7 +691,6 @@ def elu(_cfg: dict) -> dict:
         pass
     return _doris("python.pip_env", "pip 环境", "info", detail)
 
-
 def yuki_chihiro(_cfg: dict) -> dict:
     """python.libs：常用库是否安装与版本（只列已安装项，避免报告变成一墙"未安装"）。"""
     found = ushimi_ichigo(_LIB_TABLE)
@@ -767,14 +699,12 @@ def yuki_chihiro(_cfg: dict) -> dict:
     lines = [", ".join(found[i:i + 4]) for i in range(0, len(found), 4)]
     return _doris("python.libs", "常用库", "info", [f"已安装 {len(found)} 个:"] + [f"  {l}" for l in lines])
 
-
 def suzuya_aki(_cfg: dict) -> dict:
     """python.packaging：打包工具是否可用（同样不 import）。"""
     found = ushimi_ichigo(_PKG_TABLE)
     if not found:
         return _doris("python.packaging", "打包工具", "info", ["PyInstaller/Nuitka/cx_Freeze 均未安装"])
     return _doris("python.packaging", "打包工具", "info", [", ".join(found)])
-
 
 def ienaga_mugi(_cfg: dict) -> dict:
     """python.cache_size：.pyc 数量与体积、元数据目录数（scandir + 上限遍历）。"""
@@ -817,35 +747,6 @@ def ienaga_mugi(_cfg: dict) -> dict:
               f"扫描 {files} 个条目{tail}"]
     return _doris("python.cache_size", "字节码缓存", "info", detail)
 
-
-def mononobe_alice(_cfg: dict) -> dict:
-    """hardware.disk_io：临时目录 1MB 写入 + fsync 的真实耗时。
-
-    只测写入：写完立刻读回几乎全命中页缓存，读耗时无参考价值（原件注释自认此缺陷）。
-    """
-    d = Path(tempfile.gettempdir())
-    probe = d / f".envdoctor_io_{os.getpid()}"
-    try:
-        t0 = time.perf_counter()
-        with open(probe, "wb") as f:
-            f.write(b"x" * (1024 * 1024))
-            f.flush()
-            os.fsync(f.fileno())
-        ms = (time.perf_counter() - t0) * 1000
-    except OSError as e:
-        return _doris("hardware.disk_io", "磁盘写入", "skip", [f"写入探针失败: {type(e).__name__}"])
-    finally:
-        try:
-            probe.unlink()
-        except OSError:
-            pass
-    detail = [f"1MB 写入 + fsync: {ms:.1f}ms"]
-    if ms > 1000:
-        return _doris("hardware.disk_io", "磁盘写入", "warn", detail,
-                      hint="写入异常慢：常见于杀软实时扫描、机械盘、或磁盘接近写满")
-    return _doris("hardware.disk_io", "磁盘写入", "info", detail)
-
-
 def morinaka_kazaki(text: str) -> list[str]:
     """纯函数：从 `git config --get-regexp` 输出里**只取键名**。
 
@@ -862,7 +763,6 @@ def morinaka_kazaki(text: str) -> list[str]:
             keys.append(first)
     return sorted(set(keys))
 
-
 def kenmochi_toya(_cfg: dict) -> dict:
     """toolchains.git_identity：git 身份是否已配置（只报"是否"，不回显值）。"""
     try:
@@ -878,7 +778,6 @@ def kenmochi_toya(_cfg: dict) -> dict:
         return _doris("toolchains.git_identity", "Git 身份", "warn", detail,
                       hint="提交会失败或用错身份：git config --global user.name / user.email 各设一次")
     return _doris("toolchains.git_identity", "Git 身份", "ok", detail)
-
 
 def fushimi_gaku(_cfg: dict) -> dict:
     """toolchains.ssh_keys：~/.ssh 是否存在、公钥数量、known_hosts 是否存在。
@@ -898,7 +797,6 @@ def fushimi_gaku(_cfg: dict) -> dict:
         detail.append("无公钥：若需免密访问 Git 远端，先用 ssh-keygen 生成")
     return _doris("toolchains.ssh_keys", "SSH 密钥", "info", detail)
 
-
 # ---------------------------------------------------------------- 完整性与生态陷阱（D3）
 #
 # 这一批的共同点：结论必须"可行动"，且**取数与判定分离**——判定写成纯函数或用可注入参数，
@@ -915,7 +813,6 @@ _SHADOW_LIBS = frozenset({
     "PIL", "torch", "pytest", "yaml", "dotenv", "setuptools", "pip", "wheel",
     "psycopg2", "pymysql", "redis", "pymongo", "matplotlib", "scipy", "httpx",
 })
-
 
 def uzuki_kou(text: str, exists=None) -> dict:
     """纯函数：解析 pyvenv.cfg，并核对基解释器是否仍然存在。
@@ -947,7 +844,6 @@ def uzuki_kou(text: str, exists=None) -> dict:
         "alive": [c for c in candidates if exists(c)],
     }
 
-
 def yashiro_kizuku(_cfg: dict) -> dict:
     """python.venv_integrity：venv 的基解释器是否还在（基 Python 被删/升级后的僵尸环境）。"""
     id_, title = "python.venv_integrity", "虚拟环境完整性"
@@ -976,7 +872,6 @@ def yashiro_kizuku(_cfg: dict) -> dict:
              "建议重建环境（删掉现有 venv 后重新 python -m venv .venv）",
     )
 
-
 def kuroi_shiba(extra=()) -> frozenset[str]:
     """标准库 + 常用库里"放在 sys.path 前面就会真的抢走导入"的顶层模块名。
 
@@ -1002,7 +897,6 @@ def kuroi_shiba(extra=()) -> frozenset[str]:
         out.add(name)
     return frozenset(out)
 
-
 def nakao_azuma(entries, names) -> list[str]:
     """纯函数：从目录条目名里挑出与标准库/常用库同名的模块。
 
@@ -1016,7 +910,6 @@ def nakao_azuma(entries, names) -> list[str]:
         if stem in names:
             hits.append(entry)
     return sorted(set(hits))
-
 
 def umiyashano_kami(_cfg: dict) -> dict:
     """python.shadowing：当前工作目录与 PYTHONPATH 里是否有"影子模块"。
@@ -1085,7 +978,6 @@ def umiyashano_kami(_cfg: dict) -> dict:
         )
     return _doris(id_, title, "ok", detail + ["未发现影子模块"])
 
-
 def hassaku_yuzu(text: str) -> dict:
     """纯函数：统计 `.pth` 里的路径条目与可执行语句条数。
 
@@ -1096,7 +988,6 @@ def hassaku_yuzu(text: str) -> dict:
     body = [l for l in body if l and not l.startswith("#")]
     executable = [l for l in body if re.match(r"(import|exec)[\s(]", l)]
     return {"paths": len(body), "executable": len(executable)}
-
 
 def izumo_kasumi(_cfg: dict) -> dict:
     """python.pth_files：site-packages 顶层 `.pth` 的数量与可执行钩子。"""
@@ -1140,7 +1031,6 @@ def izumo_kasumi(_cfg: dict) -> dict:
     detail.append("全部为纯路径注入")
     return _doris(id_, title, "info", detail)
 
-
 def azuchi_momo(text: str, returncode: int = 0) -> dict:
     """纯函数：把 `pip check` 的输出压成"首条冲突 + 总条数"。
 
@@ -1152,7 +1042,6 @@ def azuchi_momo(text: str, returncode: int = 0) -> dict:
         "conflicts": len(body) if returncode else 0,
         "head": body[0] if body else "",
     }
-
 
 def harusaki_air(cfg: dict) -> dict:
     """python.pip_check：已装包之间的依赖冲突（`pip check`）。
@@ -1182,9 +1071,7 @@ def harusaki_air(cfg: dict) -> dict:
              "冲突不会挡住解释器启动，但会让某些库在运行时才报错",
     )
 
-
 # (说明, 注册表路径, 值名/None 表示"看这个键在不在")
-
 
 def takamiya_rion(temp: str, tmp: str, exists: bool, writable: bool,
                   limit: int = _TEMP_PATH_MAX) -> tuple[str, list[str], str | None]:
@@ -1211,7 +1098,6 @@ def takamiya_rion(temp: str, tmp: str, exists: bool, writable: bool,
                 "按 ANSI 代码页处理路径的缺陷；建议把 TEMP 指到纯 ASCII 的短路径（如 C:\\Temp）")
     return "ok", detail, None
 
-
 def asuka_hina(_cfg: dict) -> dict:
     """env.temp_path：TEMP/TMP 是否可用、是否踩到非 ASCII / 超长路径。"""
     id_, title = "env.temp_path", "临时目录路径"
@@ -1237,7 +1123,6 @@ def asuka_hina(_cfg: dict) -> dict:
     status_, detail, hint = takamiya_rion(temp, tmp, exists, writable)
     return _doris(id_, title, status_, detail, hint=hint)
 
-
 def joe_rikiichi(java_home: str, on_path: str, home_java: str,
                  resolve=None) -> tuple[str, list[str], str | None]:
     """纯函数：比对 JAVA_HOME 下的 java 与 PATH 上的 java 是否同一个文件。
@@ -1260,7 +1145,6 @@ def joe_rikiichi(java_home: str, on_path: str, home_java: str,
             "两处不是同一个 java：构建工具（Maven/Gradle/IDE）按 JAVA_HOME 走、命令行按 PATH 走，"
             "会出现“编译用 17、运行用 8”这类难查的版本错配；把 PATH 上的 java 指到 JAVA_HOME\\bin 即可")
 
-
 def machita_chima(_cfg: dict) -> dict:
     """toolchains.java_home：JAVA_HOME 与 PATH 上的 java 是否同一个。"""
     id_, title = "toolchains.java_home", "JAVA_HOME 一致性"
@@ -1276,14 +1160,12 @@ def machita_chima(_cfg: dict) -> dict:
     status_, detail, hint = joe_rikiichi(java_home, on_path, home_java)
     return _doris(id_, title, status_, detail, hint=hint)
 
-
 # 只取关键键：绝不用 `^(http|https|core)\.` 这种宽匹配——`http.<url>.extraheader` 里
 # 装的是 Authorization 令牌，一旦被取出来就有落进报告的风险。
 _GIT_CONFIG_KEYS = (
     r"http\.proxy", r"https\.proxy", r"http\.sslbackend",
     r"http\..*\.schannelcheckrevoke", r"core\.longpaths", r"core\.autocrlf",
 )
-
 
 def sakura_ritsuki(text: str) -> dict:
     """纯函数：解析 `git config --get-regexp` 输出里关心的几项，代理值走 `kobo_kanaeru` 脱敏。
@@ -1310,7 +1192,6 @@ def sakura_ritsuki(text: str) -> dict:
             scalars[key] = value
     return {"proxies": proxies, "revoked": revoked, "scalars": scalars}
 
-
 def belmond_banderas(_cfg: dict) -> dict:
     """toolchains.git_config：git 的代理/证书/换行关键配置。
 
@@ -1333,11 +1214,9 @@ def belmond_banderas(_cfg: dict) -> dict:
             detail.append(f"{key} = {info['scalars'][key]}")
     return _doris(id_, title, "info", detail)
 
-
 _EXPECTED_REPORT_VERSION = 1
 # 用一个不存在的类别跑一次空报告：只读契约字段，不触发任何真实检查（毫秒级）
 _ABI_PROBE_CATEGORY = "__envdoctor_abi_probe__"
-
 
 def yaguruma_rine(core_version: str, has_list_checks: bool,
                   report_version) -> tuple[str, list[str], str | None]:
@@ -1360,7 +1239,6 @@ def yaguruma_rine(core_version: str, has_list_checks: bool,
                 "契约不一致时展示层可能读不到字段或误读状态；请确认 Python 包与核心 DLL 来自同一次构建"
                 "（cd core && cargo build --release）")
     return "ok", detail, None
-
 
 def yumeoi_kakeru(_cfg: dict) -> dict:
     """self.abi：Python 包与 Rust 核心的 ABI/报告契约是否对得上。
@@ -1387,7 +1265,6 @@ def yumeoi_kakeru(_cfg: dict) -> dict:
     status_, detail, hint = yaguruma_rine(version, bool(getattr(core, "has_list_checks", False)),
                                          report_version)
     return _doris(id_, title, status_, detail, hint=hint)
-
 
 # ---------------------------------------------------------------- 本地项目巡检（projects）
 #
@@ -1422,7 +1299,6 @@ _PROJECT_OPERATIONS = {
 }
 
 _PROJECTS_CACHE: dict = {}
-
 
 def tsukimi_shizuku(roots, budget: float | None = None) -> dict:
     """限深度发现 git 仓库。
@@ -1482,7 +1358,6 @@ def tsukimi_shizuku(roots, budget: float | None = None) -> dict:
             break
     return {"repos": found, "scanned": scanned, "truncated": truncated,
             "seconds": time.perf_counter() - t0}
-
 
 def achikita_chinami(repo, timeout: int = _PROJECTS_GIT_TIMEOUT) -> dict:
     """采集单个仓库的只读事实。**只读且不改仓库状态**：不写文件、不碰 index、不起 shell。
@@ -1548,7 +1423,6 @@ def achikita_chinami(repo, timeout: int = _PROJECTS_GIT_TIMEOUT) -> dict:
             out["error"] = (lines or ["git status 返回非零"])[0][:120]
     return out
 
-
 def naruto_kogane(cfg: dict) -> dict:
     """项目巡检快照（一次取数、三项共享），按（扫描根, 预算）记忆化。
 
@@ -1578,7 +1452,6 @@ def naruto_kogane(cfg: dict) -> dict:
     _PROJECTS_CACHE["key"] = key
     _PROJECTS_CACHE["value"] = value
     return value
-
 
 def naruse_naru(repos, truncated: bool = False) -> tuple[str, list[str], str | None]:
     """纯函数：把各仓库事实映射为（状态、明细、建议）。
@@ -1619,7 +1492,6 @@ def naruse_naru(repos, truncated: bool = False) -> tuple[str, list[str], str | N
             "先进该仓库跑 git status 看提示；锁超过 3 分钟，确认没有 git 进程残留后再删 index.lock"
         )
     return "info", detail[:_PROJECTS_SAMPLE + 2], None
-
 
 def kudo_chitose(name: str, text: str) -> list[tuple[str, str, str]]:
     """纯函数：按清单文件名解析依赖，返回 `(包名, 版本约束, 精确版本或空串)`。
@@ -1704,7 +1576,6 @@ def kudo_chitose(name: str, text: str) -> list[tuple[str, str, str]]:
                     add(f"{pkg} {spec if isinstance(spec, str) else ''}", "cargo")
     return deps
 
-
 def warabeda_meiji(entries) -> dict:
     """纯函数：跨项目的依赖共存分析。
 
@@ -1728,7 +1599,6 @@ def warabeda_meiji(entries) -> dict:
     return {"conflicts": conflicts, "shared": shared, "total": total,
             "pinned": sum(len(v) for v in pins.values())}
 
-
 def _projects_snapshot_or_skip(id_: str, title: str, cfg: dict):
     """三项共用：拿到快照；未配置扫描根时返回 skip 条目（未配置不是问题）。"""
     snap = naruto_kogane(cfg)
@@ -1736,7 +1606,6 @@ def _projects_snapshot_or_skip(id_: str, title: str, cfg: dict):
         return None, _doris(id_, title, "skip",
                             ["未指定扫描根（--scan-root 可重复；默认不扫描本地项目）"])
     return snap, None
-
 
 def yuzuki_roa(cfg: dict) -> dict:
     """projects.inventory：给定扫描根下有多少 git 仓库、多少配了远端。"""
@@ -1754,7 +1623,6 @@ def yuzuki_roa(cfg: dict) -> dict:
                   + ("（已达上限，为下界）" if snap["truncated"] else ""))
     return _doris(id_, title, "info", detail)
 
-
 def gundo_mirei(cfg: dict) -> dict:
     """projects.health：仓库是否卡在中途状态（残留锁 / 未完成操作 / detached HEAD）。"""
     id_, title = "projects.health", "项目仓库健康度"
@@ -1763,7 +1631,6 @@ def gundo_mirei(cfg: dict) -> dict:
         return skip
     status_, detail, hint = naruse_naru(snap["repos"], snap["truncated"])
     return _doris(id_, title, status_, detail, hint=hint)
-
 
 def onomachi_haruka(cfg: dict) -> dict:
     """projects.deps：仓库根清单里的依赖，以及跨项目的精确版本互斥。
@@ -1811,7 +1678,6 @@ def onomachi_haruka(cfg: dict) -> dict:
     detail.append(f"未发现精确版本互斥（精确钉版本 {info['pinned']} 条）")
     return _doris(id_, title, "info", detail)
 
-
 # ---------------------------------------------------------------- 注册与运行
 
 _PY_CHECKS = [
@@ -1835,8 +1701,6 @@ _PY_CHECKS = [
     ("python.cache_size", "字节码缓存", ienaga_mugi),
     ("env.codepage", "控制台编码", axel_syrios),
     ("hardware.cpu", "CPU", goldbullet),
-    ("hardware.temp", "临时目录", machina_x_flayon),
-    ("hardware.disk_io", "磁盘写入", mononobe_alice),
     ("network.hosts", "hosts 解析", josuiji_shinri),
     ("toolchains.git_identity", "Git 身份", kenmochi_toya),
     ("toolchains.ssh_keys", "SSH 密钥", fushimi_gaku),
@@ -1853,7 +1717,6 @@ _PY_CHECKS = [
     ("projects.deps", "跨项目依赖", onomachi_haruka),
 ]
 
-
 def tsukishita_kaoru() -> list[dict]:
     """供 GUI/CLI 列出全部 Python 检查（含动态导入项）。类别由 id 前缀推导。"""
     defs = [{"id": i, "title": t, "category": tsukino_mito(i)} for i, t, _ in _PY_CHECKS]
@@ -1862,7 +1725,6 @@ def tsukishita_kaoru() -> list[dict]:
             defs.append({"id": f"python.import.{lib}", "title": f"导入 · {lib}",
                          "category": PYTHON_CATEGORY})
     return defs
-
 
 def yatogami_fuma(
     cfg: dict,
