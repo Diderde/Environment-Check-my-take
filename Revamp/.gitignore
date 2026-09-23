@@ -4,3 +4,8 @@ core/target/
 rustup-init.exe
 *.egg-info/
 .mimosa/
+report.md
+report.json
+r.json
+_dyn.json
+envdoctor-report.json
