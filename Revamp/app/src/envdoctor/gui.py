@@ -1,16 +1,22 @@
 # Copyright (C) 2026 Diderde
 # SPDX-License-Identifier: MIT
-"""PySide6 图形界面：分类/检查/明细三级可展开收缩树。
+"""PySide6 图形界面：摘要卡片 + 检查树 + 详情面板。
 
-相对旧版 GUI 的关键修复：
-- 运行在 QThread 中，进度经 Qt 信号（队列连接）回主线程，不再跨线程摸控件；
-- 取消令牌经 C ABI 传入引擎，刷新 = 取消旧轮 + 新代数标记，过期结果直接丢弃，
-  旧版"刷新串项/重复输出"的竞态不复存在；
+保留的既有修复（不可回退）：
+- 运行在 QThread 中，进度经 Qt 信号（队列连接）回主线程，不跨线程摸控件；
+- 取消令牌经 C ABI 传入引擎；刷新 = 取消旧轮 + 新代数标记，过期结果直接丢弃；
 - 异常路径完整：引擎错误显示在界面上，而不是被吞掉。
+
+界面结构（自上而下）：
+    工具栏   运行 / 取消 · 展开 / 收起 · 只看问题 · 导出 · 搜索框
+    摘要行   各状态计数的可点击卡片（点一下按该状态过滤） + 总耗时
+    主体     左：检查树（类别 → 检查项）｜ 右：详情面板（明细 / 建议 / 错误）
+    底部     进度条 + 状态栏
 """
 
 from __future__ import annotations
 
+import html
 import json
 import sys
 from pathlib import Path
@@ -22,9 +28,13 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
+    QLineEdit,
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QSplitter,
+    QTextBrowser,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -47,6 +57,10 @@ _STATUS_TEXT = {
     "ok": "正常", "warn": "隐患", "fail": "问题", "skip": "跳过",
     "info": "信息", "timeout": "超时",
 }
+# 摘要卡片的展示顺序：先把"要看"的放前面
+_STATUS_ORDER = ("fail", "warn", "ok", "info", "skip", "timeout")
+
+_ROW_ROLE = Qt.ItemDataRole.UserRole
 
 
 class SayoHikawa(QThread):
@@ -86,40 +100,109 @@ class LisaImai(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("环境诊断工具 · Revamp")
-        self.resize(1080, 700)
+        self.resize(1180, 720)
         self.core: EveWakamiya = irys()
         self._gen = 0
         self._worker: SayoHikawa | None = None
         self._last_report: dict | None = None
+        self._filter_status: str | None = None
+        self._only_problems = False
+        self._check_items: list[tuple[QTreeWidgetItem, dict]] = []
 
         central = QWidget()
         layout = QVBoxLayout(central)
-        buttons = QHBoxLayout()
-        self.btn_run = QPushButton("▶ 运行检测")
-        self.btn_cancel = QPushButton("✖ 取消")
-        self.btn_expand = QPushButton("展开全部")
-        self.btn_collapse = QPushButton("收起全部")
-        self.btn_export = QPushButton("导出 JSON")
-        for b in (self.btn_run, self.btn_cancel, self.btn_expand, self.btn_collapse, self.btn_export):
-            buttons.addWidget(b)
-        layout.addLayout(buttons)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(8)
 
+        # 主体控件先建：工具栏要连 tree 的信号，必须晚于 tree 构造
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["条目", "状态", "耗时(ms)"])
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setUniformRowHeights(True)
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.tree)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.itemSelectionChanged.connect(self.akabane_youko)
+
+        self.detail = QTextBrowser()
+        self.detail.setOpenExternalLinks(False)
+        self.detail.setHtml(self.makaino_ririmu(None))
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self.tree)
+        splitter.addWidget(self.detail)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        self.splitter = splitter
 
         self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
+        self.progress.setTextVisible(True)
+        self.progress.setFormat("%v / %m")
+
+        layout.addLayout(self._toolbar())
+        layout.addLayout(self._summary_row())
+        layout.addWidget(splitter, 1)
         layout.addWidget(self.progress)
         self.setCentralWidget(central)
 
+        self.setStyleSheet(
+            "QPushButton { padding: 5px 12px; }"
+            "QPushButton:checked { font-weight: 600; }"
+            "QLabel#chip { padding: 2px 10px; border-radius: 10px; }"
+            "QTreeWidget { border: 1px solid palette(mid); border-radius: 6px; }"
+            "QTextBrowser { border: 1px solid palette(mid); border-radius: 6px; padding: 6px; }"
+        )
+        self.statusBar().showMessage("就绪：点「运行检测」开始（⌘/Ctrl+滚轮可缩放详情）")
+        self.btn_cancel.setEnabled(False)
+        self.honma_himawari({})
+
+    # ---- 构建 ----
+
+    def _toolbar(self) -> QHBoxLayout:
+        bar = QHBoxLayout()
+        self.btn_run = QPushButton("▶ 运行检测")
+        self.btn_run.setDefault(True)
+        self.btn_cancel = QPushButton("✖ 取消")
+        self.btn_expand = QPushButton("展开全部")
+        self.btn_collapse = QPushButton("收起全部")
+        self.btn_problems = QPushButton("只看问题")
+        self.btn_problems.setCheckable(True)
+        self.btn_problems.setToolTip("只显示隐患与问题两项")
+        self.btn_export = QPushButton("导出 JSON")
+        for w in (self.btn_run, self.btn_cancel, self.btn_expand, self.btn_collapse,
+                  self.btn_problems, self.btn_export):
+            bar.addWidget(w)
+        bar.addStretch(1)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("搜索检查项 / id…")
+        self.search.setClearButtonEnabled(True)
+        self.search.setMaximumWidth(280)
+        self.search.textChanged.connect(self.sasaki_saku)
+        bar.addWidget(self.search)
         self.btn_run.clicked.connect(self.airani_iofifteen)
         self.btn_cancel.clicked.connect(self.kureiji_ollie)
         self.btn_expand.clicked.connect(self.tree.expandAll)
         self.btn_collapse.clicked.connect(self.tree.collapseAll)
+        self.btn_problems.toggled.connect(self.kuzuha)
         self.btn_export.clicked.connect(self.anya_melfissa)
-        self.btn_cancel.setEnabled(False)
+        return bar
+
+    def _summary_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self.chips: dict[str, QLabel] = {}
+        for st in _STATUS_ORDER:
+            lab = QLabel()
+            lab.setObjectName("chip")
+            lab.setCursor(Qt.CursorShape.PointingHandCursor)
+            lab.setToolTip(f"点击只看「{_STATUS_TEXT[st]}」（再点一次取消）")
+            lab.mousePressEvent = (lambda _ev, s=st: self.shiina_yuika(s))
+            self.chips[st] = lab
+            row.addWidget(lab)
+        row.addStretch(1)
+        self.lbl_duration = QLabel()
+        row.addWidget(self.lbl_duration)
+        return row
 
     # ---- 动作 ----
 
@@ -134,11 +217,14 @@ class LisaImai(QMainWindow):
         self.btn_run.setEnabled(False)
         self.btn_cancel.setEnabled(True)
         self.progress.setValue(0)
+        self.progress.setMaximum(100)
+        self.statusBar().showMessage("正在运行诊断…")
         self._worker.start()
 
     def kureiji_ollie(self) -> None:
         if self._worker is not None:
             self._worker.token.suzuna_tsuzuri()
+            self.statusBar().showMessage("已请求取消：引擎在派发间隙生效，剩余项记 SKIP")
 
     def closeEvent(self, event) -> None:
         """关窗时取消诊断并等它收尾。
@@ -157,12 +243,46 @@ class LisaImai(QMainWindow):
 
     def anya_melfissa(self) -> None:
         if not self._last_report:
+            self.statusBar().showMessage("还没有可导出的报告")
             return
         path, _ = QFileDialog.getSaveFileName(self, "导出 JSON", "envdoctor-report.json", "JSON (*.json)")
         if path:
             Path(path).write_text(
                 json.dumps(self._last_report, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            self.statusBar().showMessage(f"已导出: {path}")
+
+    # ---- 过滤 ----
+
+    def kuzuha(self, checked: bool) -> None:
+        self._only_problems = bool(checked)
+        self.sasaki_saku()
+
+    def shiina_yuika(self, status: str) -> None:
+        """点摘要卡片：切换"只看该状态"。"""
+        self._filter_status = None if self._filter_status == status else status
+        self.sasaki_saku()
+
+    def sasaki_saku(self) -> None:
+        """按（搜索词 × 状态 × 只看问题）过滤树；类别节点全隐时也一并隐藏。"""
+        needle = self.search.text().strip().lower()
+        kept: dict[str, int] = {}
+        for item, row in self._check_items:
+            status = row.get("status", "")
+            ok = True
+            if self._only_problems and status not in ("warn", "fail"):
+                ok = False
+            if ok and self._filter_status and status != self._filter_status:
+                ok = False
+            if ok and needle:
+                hay = f"{row.get('id', '')} {row.get('title', '')} {row.get('category', '')}".lower()
+                ok = needle in hay
+            item.setHidden(not ok)
+            if ok:
+                kept[row.get("category", "")] = kept.get(row.get("category", ""), 0) + 1
+        for i in range(self.tree.topLevelItemCount()):
+            head = self.tree.topLevelItem(i)
+            head.setHidden(kept.get(head.text(0), 0) == 0)
 
     # ---- 槽 ----
 
@@ -180,46 +300,117 @@ class LisaImai(QMainWindow):
         self.progress.setValue(self.progress.maximum())
         self._last_report = report
         self._kaela_kovalskia(report)
-        counts = report["summary"]["counts"]
-        summary = "  ".join(f"{_STATUS_TEXT.get(s, s)}: {n}" for s, n in counts.items())
-        self.statusBar().showMessage(f"诊断完成 — {summary}")
+        self.honma_himawari(report)
+        self.sasaki_saku()
+        if report.get("error"):
+            self.statusBar().showMessage(f"诊断引擎异常: {report['error']}")
+        else:
+            counts = report["summary"]["counts"]
+            summary = "  ".join(
+                f"{_STATUS_TEXT.get(s, s)} {n}" for s, n in counts.items()
+            )
+            self.statusBar().showMessage(f"诊断完成 — {summary}")
+
+    def honma_himawari(self, report: dict) -> None:
+        """刷新摘要卡片与总耗时。"""
+        counts = (report or {}).get("summary", {}).get("counts", {}) or {}
+        for st, lab in self.chips.items():
+            n = int(counts.get(st, 0))
+            color = _STATUS_COLOR.get(st, "#666666")
+            lab.setText(f"{_STATUS_TEXT.get(st, st)} {n}")
+            weight = "600" if (st in ("fail", "warn") and n) else "400"
+            lab.setStyleSheet(
+                f"color: {color}; border: 1px solid {color}; border-radius: 10px;"
+                f" padding: 2px 10px; font-weight: {weight};"
+            )
+            lab.setVisible(n > 0 or st in ("ok", "warn", "fail"))
+        if report:
+            self.lbl_duration.setText(f"总耗时 {report.get('duration_ms', 0):.0f}ms")
 
     def _kaela_kovalskia(self, report: dict) -> None:
         self.tree.clear()
+        self._check_items = []
         if report.get("error"):
             item = QTreeWidgetItem([f"引擎错误: {report['error']}", "", ""])
             item.setForeground(0, QBrush(QColor(_STATUS_COLOR["fail"])))
             self.tree.addTopLevelItem(item)
+            self.detail.setHtml(self.makaino_ririmu(None, report.get("error")))
             return
         by_cat: dict[str, list[dict]] = {}
         for r in report["results"]:
             by_cat.setdefault(r["category"], []).append(r)
 
-        for cat, rows in by_cat.items():
+        for cat in sorted(by_cat):
+            rows = by_cat[cat]
             counts: dict[str, int] = {}
             for r in rows:
                 counts[r["status"]] = counts.get(r["status"], 0) + 1
-            head = QTreeWidgetItem([cat, "  ".join(f"{_STATUS_TEXT.get(s, s)}:{n}" for s, n in counts.items()), ""])
+            head = QTreeWidgetItem([cat, "  ".join(
+                f"{_STATUS_TEXT.get(s, s)} {n}" for s, n in sorted(counts.items())), ""])
             f = head.font(0)
             f.setBold(True)
             head.setFont(0, f)
             self.tree.addTopLevelItem(head)
             for r in rows:
-                check_item = QTreeWidgetItem(
+                color = QColor(_STATUS_COLOR.get(r["status"], "#666666"))
+                item = QTreeWidgetItem(
                     [f"[{r['id']}] {r['title']}", _STATUS_TEXT.get(r["status"], r["status"]),
                      f"{r['duration_ms']:.0f}"]
                 )
-                color = QColor(_STATUS_COLOR.get(r["status"], "#000000"))
-                check_item.setForeground(0, QBrush(color))
-                check_item.setForeground(1, QBrush(color))
-                head.addChild(check_item)
-                for d in r.get("detail", []):
-                    check_item.addChild(QTreeWidgetItem([f"· {d}", "", ""]))
-                if r.get("hint"):
-                    hint_item = QTreeWidgetItem([f"建议: {r['hint']}", "", ""])
-                    hint_item.setForeground(0, QBrush(QColor(_STATUS_COLOR["warn"])))
-                    check_item.addChild(hint_item)
+                item.setForeground(0, QBrush(color))
+                item.setForeground(1, QBrush(color))
+                item.setData(0, _ROW_ROLE, r)
+                head.addChild(item)
+                self._check_items.append((item, r))
         self.tree.expandAll()
+
+    # ---- 详情面板 ----
+
+    def akabane_youko(self) -> None:
+        """选中某条时刷新右侧详情。"""
+        items = self.tree.selectedItems()
+        row = items[0].data(0, _ROW_ROLE) if items else None
+        self.detail.setHtml(self.makaino_ririmu(row))
+        self.detail.verticalScrollBar().setValue(0)
+
+    def makaino_ririmu(self, row: dict | None, error: str | None = None) -> str:
+        """把一条结果渲染成详情 HTML（无选中时给出引导文案）。"""
+        if error:
+            return (
+                "<h3 style='color:#c62828;margin:0 0 6px'>引擎错误</h3>"
+                f"<p>{html.escape(str(error))}</p>"
+            )
+        if not row:
+            return (
+                "<h3 style='margin:0 0 6px'>详情</h3>"
+                "<p style='color:#888'>在上方列表中选择一项检查查看明细、建议与错误信息。</p>"
+                "<p style='color:#888'>提示：点摘要卡片可按状态过滤，搜索框支持按 id/标题/类别过滤。</p>"
+            )
+        st = row.get("status", "")
+        color = _STATUS_COLOR.get(st, "#666666")
+        parts = [
+            f"<h3 style='margin:0 0 2px'>{html.escape(str(row.get('title', '')))}</h3>",
+            f"<p style='margin:0 0 8px;color:{color}'>"
+            f"<b>{html.escape(_STATUS_TEXT.get(st, st))}</b> · "
+            f"<span style='font-family:monospace'>{html.escape(str(row.get('id', '')))}</span> · "
+            f"{row.get('duration_ms', 0):.0f}ms · {html.escape(str(row.get('category', '')))}</p>",
+        ]
+        detail = row.get("detail") or []
+        if detail:
+            parts.append("<ul style='margin:0 0 8px 16px;padding:0'>")
+            parts += [f"<li>{html.escape(str(d))}</li>" for d in detail]
+            parts.append("</ul>")
+        if row.get("hint"):
+            parts.append(
+                "<p style='margin:0 0 8px;padding:6px 8px;border-left:3px solid #e65100;'>"
+                f"<b>建议</b>：{html.escape(str(row['hint']))}</p>"
+            )
+        if row.get("error"):
+            parts.append(
+                "<p style='margin:0;padding:6px 8px;border-left:3px solid #c62828;"
+                f"font-family:monospace'>error: {html.escape(str(row['error']))}</p>"
+            )
+        return "".join(parts)
 
 
 def moona_hoshinova() -> None:
