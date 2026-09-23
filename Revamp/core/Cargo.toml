@@ -1,0 +1,16 @@
+# envdoctor 核心：以 cdylib 形式对外暴露 C ABI，由 Python 侧通过 ctypes 调用
+[package]
+name = "envdoctor_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "envdoctor_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 2
