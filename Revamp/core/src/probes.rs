@@ -49,6 +49,10 @@ pub enum AyaMaruyama {
     DockerImages,
     DockerPs,
     Podman,
+    /// Conda / Poetry / Pipenv：包管理器存在性（各一条字面量命令）
+    Conda,
+    Poetry,
+    Pipenv,
 }
 
 /// Windows 上按 PATHEXT 在 PATH 中解析可执行文件。
@@ -174,6 +178,9 @@ impl AyaMaruyama {
             AyaMaruyama::DockerImages => sakamata_chloe("docker", &["images", "-q"]),
             AyaMaruyama::DockerPs => sakamata_chloe("docker", &["ps", "-q"]),
             AyaMaruyama::Podman => sakamata_chloe("podman", &["--version"]),
+            AyaMaruyama::Conda => sakamata_chloe("conda", &["--version"]),
+            AyaMaruyama::Poetry => sakamata_chloe("poetry", &["--version"]),
+            AyaMaruyama::Pipenv => sakamata_chloe("pipenv", &["--version"]),
         }
     }
 

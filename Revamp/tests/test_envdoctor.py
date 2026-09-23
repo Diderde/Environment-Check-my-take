@@ -8,6 +8,7 @@ import ctypes
 import io
 import json
 import os
+import shutil
 import ssl
 import subprocess
 import sys
@@ -609,6 +610,193 @@ class ReportPrivacyTest(unittest.TestCase):
         blob = json.dumps(rows, ensure_ascii=False)
         self.assertNotIn(home, blob)
         self.assertTrue(any(r["id"] == "env.path_validity" for r in rows), [r["id"] for r in rows])
+
+
+class D2ChecksTest(unittest.TestCase):
+    """D2 批：环境/生态明细类检查。全部走注入或 mock，不依赖宿主环境。"""
+
+    # ---- python.startup
+    def test_startup_ok_when_fast(self):
+        with mock.patch.object(pychecks.subprocess, "run", return_value=None):
+            r = pychecks.moira({"timeout_secs": 25})
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual(r["category"], "python")
+
+    def test_startup_warns_on_timeout(self):
+        with mock.patch.object(pychecks.subprocess, "run",
+                               side_effect=subprocess.TimeoutExpired("x", 1)):
+            r = pychecks.moira({"timeout_secs": 25})
+        self.assertEqual(r["status"], "warn")
+
+    # ---- 带上限的目录统计
+    def test_capped_walk_counts_and_truncates(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "a.txt").write_bytes(b"x" * 100)
+            (tmp / "b.txt").write_bytes(b"y" * 50)
+            r = pychecks.crimzon_ruze(tmp)
+            self.assertEqual(r["files"], 2)
+            self.assertEqual(r["bytes"], 150)
+            self.assertFalse(r["truncated"])
+            r2 = pychecks.crimzon_ruze(tmp, max_files=1)
+            self.assertTrue(r2["truncated"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- 库探测：模块名 ≠ 发行名
+    def test_lib_table_uses_dist_name_for_version(self):
+        calls = []
+
+        def fake_version(dist):
+            calls.append(dist)
+            return "9.9.9"
+
+        with mock.patch.object(pychecks.importlib.util, "find_spec", return_value=object()), \
+                mock.patch.object(pychecks.importlib.metadata, "version", side_effect=fake_version):
+            found = pychecks.ushimi_ichigo((("cv2", "opencv-python"),))
+        self.assertEqual(found, ["cv2 9.9.9"])
+        self.assertEqual(calls, ["opencv-python"], "必须按发行名取版本")
+
+    def test_lib_probe_skips_missing_without_import(self):
+        with mock.patch.object(pychecks.importlib.util, "find_spec", return_value=None):
+            self.assertEqual(pychecks.ushimi_ichigo((("numpy", "numpy"),)), [])
+        r = pychecks.yuki_chihiro({})
+        self.assertEqual(r["status"], "info")
+
+    def test_packaging_check_reports_absent(self):
+        with mock.patch.object(pychecks.importlib.util, "find_spec", return_value=None):
+            r = pychecks.suzuya_aki({})
+        self.assertIn("均未安装", r["detail"][0])
+
+    # ---- 字节码缓存：必须统计到 __pycache__ 里的 .pyc
+    def test_cache_size_counts_pyc_inside_pycache(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            cache = tmp / "__pycache__"
+            cache.mkdir()
+            (cache / "m.cpython-312.pyc").write_bytes(b"z" * 64)
+            (tmp / "pkg-1.0.dist-info").mkdir()
+            with mock.patch("sysconfig.get_paths", return_value={"purelib": str(tmp)}):
+                r = pychecks.ienaga_mugi({})
+            self.assertIn(".pyc 1 个", r["detail"][0])
+            self.assertIn("元数据目录 1 个", r["detail"][0])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- 磁盘写入
+    def test_disk_io_reports_number_and_cleans_up(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch.object(pychecks.tempfile, "gettempdir", return_value=tmp):
+                r = pychecks.mononobe_alice({})
+            self.assertIn(r["status"], ("info", "warn"))
+            self.assertIn("fsync", r["detail"][0])
+            self.assertEqual(list(Path(tmp).glob(".envdoctor*")), [])
+        finally:
+            os.rmdir(tmp)
+
+    def test_disk_io_skips_when_write_fails(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch.object(pychecks.tempfile, "gettempdir", return_value=tmp), \
+                    mock.patch("builtins.open", side_effect=OSError("denied")):
+                r = pychecks.mononobe_alice({})
+            self.assertEqual(r["status"], "skip")
+        finally:
+            os.rmdir(tmp)
+
+    # ---- git 身份：绝不回显值
+    def test_git_identity_never_leaks_values(self):
+        out = "user.name Alice\nuser.email alice@example.com\n"
+        keys = pychecks.morinaka_kazaki(out)
+        self.assertEqual(keys, ["user.email", "user.name"])
+        blob = json.dumps(keys)
+        self.assertNotIn("Alice", blob)
+        self.assertNotIn("example.com", blob)
+
+    def test_git_parser_rejects_malformed_lines(self):
+        # 形态异常（值在前）时宁可少报，也不能把值当键回显
+        self.assertEqual(pychecks.morinaka_kazaki("alice@example.com user.email\n"), [])
+        self.assertEqual(pychecks.morinaka_kazaki("notakey value\n"), [])
+
+    def test_git_identity_warns_when_missing(self):
+        fake = subprocess.CompletedProcess([], 1, b"", b"")
+        with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+            r = pychecks.kenmochi_toya({})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("user.name", r["hint"])
+
+    def test_git_identity_ok_when_both_set(self):
+        fake = subprocess.CompletedProcess([], 0, b"user.name a\nuser.email b\n", b"")
+        with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+            r = pychecks.kenmochi_toya({})
+        self.assertEqual(r["status"], "ok")
+        self.assertNotIn("user.name a", json.dumps(r, ensure_ascii=False), "不得回显值")
+
+    def test_git_identity_skips_without_git(self):
+        with mock.patch.object(pychecks.subprocess, "run", side_effect=FileNotFoundError()):
+            self.assertEqual(pychecks.kenmochi_toya({})["status"], "skip")
+
+    # ---- SSH 只报数量
+    def test_ssh_keys_counts_only(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            ssh = tmp / ".ssh"
+            ssh.mkdir()
+            (ssh / "id_ed25519.pub").write_text("ssh-ed25519 AAA alice@example.com", encoding="utf-8")
+            (ssh / "known_hosts").write_text("x", encoding="utf-8")
+            with mock.patch.object(pychecks.os.path, "expanduser", return_value=str(tmp)):
+                r = pychecks.fushimi_gaku({})
+            blob = json.dumps(r, ensure_ascii=False)
+            self.assertIn("公钥 1 个", blob)
+            self.assertNotIn("id_ed25519", blob, "不得回显密钥文件名")
+            self.assertNotIn("alice@example.com", blob)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- 长路径：注册表读取
+    def test_longpaths_ok_when_enabled(self):
+        with mock.patch.object(pychecks, "fumino_tamaki", return_value=1):
+            self.assertEqual(pychecks.gilzaren_iii({})["status"], "ok")
+
+    def test_longpaths_warns_when_disabled(self):
+        with mock.patch.object(pychecks, "fumino_tamaki", return_value=0):
+            r = pychecks.gilzaren_iii({})
+        self.assertEqual(r["status"], "warn")
+        self.assertEqual(r["category"], "env")
+
+    def test_longpaths_skips_on_registry_error(self):
+        with mock.patch.object(pychecks, "fumino_tamaki", side_effect=OSError(2, "not found")):
+            self.assertEqual(pychecks.gilzaren_iii({})["status"], "skip")
+
+    # ---- pip 环境
+    def test_pip_env_reports_and_masks_index_url(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "pip").mkdir()
+            (tmp / "pip" / "pip.ini").write_text(
+                "[global]\nindex-url = https://bob:tok3n@nexus.corp/simple\n", encoding="utf-8")
+            fake = subprocess.CompletedProcess([], 0, str(tmp).encode(), b"")
+            # 用 USERPROFILE/APPDATA 指向临时目录，隔离真实配置（否则会读到本机 pip.ini）
+            with mock.patch.dict(os.environ, {"USERPROFILE": str(tmp), "APPDATA": str(tmp),
+                                              "PROGRAMDATA": str(tmp)}), \
+                    mock.patch.object(pychecks.subprocess, "run", return_value=fake), \
+                    mock.patch("sysconfig.get_paths", return_value={"purelib": str(tmp)}):
+                r = pychecks.elu({})
+            blob = json.dumps(r, ensure_ascii=False)
+            self.assertIn("配置文件", blob)
+            self.assertNotIn("tok3n", blob, "index-url 凭据必须脱敏")
+            self.assertIn("***", blob)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- 注册：新项都进了列表
+    def test_d2_checks_registered(self):
+        ids = {d["id"] for d in pychecks.tsukishita_kaoru()}
+        for cid in ("python.startup", "python.pip_env", "python.libs", "python.packaging",
+                    "python.cache_size", "hardware.disk_io", "toolchains.git_identity",
+                    "toolchains.ssh_keys", "env.longpaths"):
+            self.assertIn(cid, ids)
 
 
 if __name__ == "__main__":
