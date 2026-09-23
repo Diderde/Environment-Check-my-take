@@ -13,7 +13,7 @@ Revamp/
 │       ├── engine.rs     #   并发调度、整体超时、取消令牌、进度回调
 │       ├── model.rs      #   MocaAoba / HimariUehara / TsugumiHazawa（JSON 交换格式）
 │       ├── probes.rs     #   白名单工具表 + 限时子进程 + Win32 FFI
-│       └── checks/       #   hardware / toolchains / network / containers / databases
+│       └── checks/       #   hardware / toolchains / network / containers / databases（env 类在 Python 侧）
 ├── app/                  # Python 包（envdoctor）
 │   └── src/envdoctor/
 │       ├── binding.py    #   ctypes 绑定（DLL 发现、进度回调、取消令牌）
@@ -52,6 +52,7 @@ envdoctor                        # 全量诊断，分类折叠显示（无参即
 envdoctor --list-checks          # 列出全部检查项（Rust 核心 + Python 侧）
 envdoctor run -E                 # 展开全部明细
 envdoctor run -c python -c network -e network   # 选类别并展开
+envdoctor run -c env -E          # 宿主环境类：代码页编码、PATH 有效性
 envdoctor run --require git,node # 声明必备工具，缺失记 FAIL（逗号或重复传参均可）
 envdoctor run --json report.json --txt report.md
 envdoctor run --net-full         # 启用公网 IP 检查（默认关闭，见隐私）
@@ -74,7 +75,7 @@ envdoctor gui                    # PySide6 图形界面
 - 报告 JSON 由 Rust 以 `CString::into_raw` 移交，Python 侧解析后**必须**调用
   `envdoctor_string_free` 归还（`CString::from_raw` 配对回收），否则泄漏；
   `envdoctor_list_checks` 的返回值同理；
-- 取消令牌 `envdoctor_cancel_new / suzuna_tsuzuri / free` 同样严格配对，且**释放必须等到
+- 取消令牌 `envdoctor_cancel_new / envdoctor_cancel_trigger / envdoctor_cancel_free` 同样严格配对，且**释放必须等到
   `envdoctor_run` 返回之后** —— 引擎在整个运行期间持有该指针的引用，运行中释放即
   use-after-free（`MayaYamato` 的 docstring 与 `envdoctor_run` 的 `# Safety` 都写明了）；
 - `envdoctor_run` 内部以 `catch_unwind` 隔离 panic：不会跨 FFI 展开，失败转为报告的
@@ -110,6 +111,8 @@ cargo test --release      # Rust 核心（模型/引擎/注册表/探测）
 - 报告中不包含用户名、序列化凭据：代理地址、`PIP_INDEX_URL` 等含 `user:pass@` 的值
   一律按同一规则（`scheme://***@host`，按最后一个 `@` 切分）打码，Rust 与 Python 两侧
   共用该规则，且两侧都有单元测试守着；
+- 路径中的用户主目录统一写作 `%USERPROFILE%`，用例名/邮箱/主机名/内网映射一律不进报告
+  （hosts 只报自定义记录条数，不回显内容；git 身份只报"是否已配置"，不回显值）；
 - 报告中的"相关环境变量"只回显上面这类脱敏后的值；
 - 导出文件内容由使用者全权控制（`--json` / `--txt` / GUI 导出按钮）。
 
