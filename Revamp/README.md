@@ -56,6 +56,7 @@ envdoctor run -c env -E          # 宿主环境类：代码页编码、PATH 有�
 envdoctor run --require git,node # 声明必备工具，缺失记 FAIL（逗号或重复传参均可）
 envdoctor run --json report.json --txt report.md
 envdoctor run --net-full         # 启用公网 IP 检查（默认关闭，见隐私）
+envdoctor run --scan-root D:\code --scan-root E:\work   # 本地项目巡检（可重复；不给则 projects.* 记 skip）
 envdoctor tui                    # Textual 终端界面（R 运行 / C 取消 / E 全部 / X 只看问题 / S 存 JSON / Q 退出）
 envdoctor gui                    # PySide6 图形界面（摘要卡片可点按状态过滤，支持搜索与"只看问题"）
 ```
@@ -65,6 +66,16 @@ envdoctor gui                    # PySide6 图形界面（摘要卡片可点按�
 
 `--timeout SECONDS`（默认 25，下限 1）是**整轮**超时预算 = 单项预算 × 检查项数；
 各检查项自身的子进程超时是各自固定的（如工具链 10s、NTP 15s）。
+
+`--scan-root` 启用 `projects.*` 三项**工作区巡检**（本地项目清点 / 仓库健康度 / 跨项目依赖）。
+它与环境类检查的分界是：那些诊断**机器**，这组诊断**工作区**，因此扫描范围必须显式给出 ——
+**不给这个参数时三项一律记 `skip`**，既不遍历文件系统也不调用 git，行为与不加该参数之前完全一致。
+扫描有全局预算（约 8s）、深度上限与仓库数上限，被截断时明细里会标注"为下界"。
+三项共享同一次扫描（首次调用它的那项承担耗时，其余两项复用）。
+
+报告里**不出现项目名与路径**：仓库一律用编号（按扫描根顺序 + 根内路径字典序，因此可复现），
+只有依赖名会回显（那是可行动信息），git 远端 URL 从不进入报告。`git status` 附加
+`--no-optional-locks`，避免它顺手刷新 index —— 巡检全程不修改任何仓库状态。
 
 控制台编码：报告输出会自动探测 `sys.stdout` 编码，中文 Windows（cp936）下把 emoji/箭头
 降级为 ASCII 图标（`[OK]`/`[!]`/`[X]`），因此 `envdoctor run > report.txt` 与 CI 管道不会
@@ -114,6 +125,8 @@ cargo test --release      # Rust 核心（模型/引擎/注册表/探测）
 - 路径中的用户主目录统一写作 `%USERPROFILE%`，用例名/邮箱/主机名/内网映射一律不进报告
   （hosts 只报自定义记录条数，不回显内容；git 身份只报"是否已配置"，不回显值）；
 - 报告中的"相关环境变量"只回显上面这类脱敏后的值；
+- `projects.*` 巡检（仅在给了 `--scan-root` 时启用）只报**编号与统计**，不回显项目名与路径；
+  会回显的只有依赖名本身（跨项目版本互斥要指出是哪个包才可行动），远端 URL 一律不进报告；
 - 导出文件内容由使用者全权控制（`--json` / `--txt` / GUI 导出按钮）。
 
 ## 许可

@@ -1563,6 +1563,429 @@ def yumeoi_kakeru(_cfg: dict) -> dict:
     return _doris(id_, title, status_, detail, hint=hint)
 
 
+# ---------------------------------------------------------------- 本地项目巡检（projects）
+#
+# 与环境类检查的分界：上面那些诊断的是**机器**（解释器/工具链/网络/注册表），
+# 这一组诊断的是**工作区**——因此扫描范围必须由调用方显式给出（--scan-root），
+# 不给就记 skip。全盘扫描实测不可行：一个根 25s 预算、40 万条目上限，17s 就截断且没走完。
+#
+# 三项检查共享同一份快照：`git status` 是逐仓库的子进程调用（实测每仓库 30~130ms），
+# 各查一遍就是三倍代价。判定全部是纯函数，取数全部走可 mock 的模块级调用。
+
+_PROJECTS_BUDGET_SECONDS = 8.0
+_PROJECTS_MAX_REPOS = 200
+_PROJECTS_WALK_MAX_ENTRIES = 200_000
+_PROJECTS_WALK_MAX_DEPTH = 3
+_PROJECTS_GIT_TIMEOUT = 6
+_PROJECTS_MANIFEST_MAX_BYTES = 256 * 1024
+_PROJECTS_SAMPLE = 5
+# 残留 index.lock 超过这个时长才算"卡住"（阈值与"锁超过 3 分钟先杀残留进程"的处置约定一致）
+_PROJECTS_LOCK_STALE_SECONDS = 180
+
+# 不值得进入的目录：产物、依赖缓存、虚拟环境。它们既不含仓库，量又极大。
+_PROJECTS_SKIP_DIRS = frozenset({
+    "node_modules", "__pycache__", ".venv", "venv", "target", "dist", "build",
+    ".mimosa", ".idea", ".vscode", "site-packages", ".mypy_cache", ".pytest_cache",
+    "$RECYCLE.BIN", "System Volume Information",
+})
+# 只看仓库根的清单文件：不限层级时实测 build.gradle 会数出 137 个（走进了 vendored/生成树）
+_PROJECT_MANIFESTS = ("requirements.txt", "pyproject.toml", "package.json", "go.mod", "Cargo.toml")
+_PROJECT_OPERATIONS = {
+    "MERGE_HEAD": "merge", "rebase-merge": "rebase", "rebase-apply": "rebase",
+    "CHERRY_PICK_HEAD": "cherry-pick", "REVERT_HEAD": "revert", "BISECT_LOG": "bisect",
+}
+
+_PROJECTS_CACHE: dict = {}
+
+
+def tsukimi_shizuku(roots, budget: float | None = None) -> dict:
+    """限深度发现 git 仓库。
+
+    `.git` 是目录（普通仓库）**或**文件（worktree / 子模块里它写着 `gitdir: …`）都算——只判目录
+    会整批漏掉 worktree。三道闸缺一不可：深度上限、条目上限、时间预算。
+    编号规则：按调用方给定的根顺序，根内按路径字典序 —— 因此编号可复现。
+    """
+    budget = _PROJECTS_BUDGET_SECONDS if budget is None else float(budget)
+    t0 = time.perf_counter()
+    found: list[Path] = []
+    seen: set[str] = set()
+    scanned = 0
+    truncated = False
+    for root in roots:
+        base = Path(root)
+        if not base.is_dir():
+            continue
+        per_root: list[Path] = []
+        stack: list[tuple[Path, int]] = [(base, 0)]
+        while stack:
+            d, depth = stack.pop()
+            try:
+                with os.scandir(d) as it:
+                    for e in it:
+                        scanned += 1
+                        if scanned > _PROJECTS_WALK_MAX_ENTRIES or time.perf_counter() - t0 > budget:
+                            truncated = True
+                            break
+                        try:
+                            is_git = e.name == ".git" and (
+                                e.is_dir(follow_symlinks=False) or e.is_file(follow_symlinks=False))
+                        except OSError:
+                            continue
+                        if is_git:
+                            repo = Path(e.path).parent
+                            key = str(repo).lower()
+                            if key not in seen:
+                                seen.add(key)
+                                per_root.append(repo)
+                            continue
+                        try:
+                            if depth >= _PROJECTS_WALK_MAX_DEPTH or e.name in _PROJECTS_SKIP_DIRS:
+                                continue
+                            if not e.is_dir(follow_symlinks=False):
+                                continue
+                        except OSError:
+                            continue
+                        stack.append((Path(e.path), depth + 1))
+            except OSError:
+                continue
+            if truncated:
+                break
+        per_root.sort(key=lambda p: str(p).lower())
+        found.extend(per_root)
+        if truncated:
+            break
+    return {"repos": found, "scanned": scanned, "truncated": truncated,
+            "seconds": time.perf_counter() - t0}
+
+
+def achikita_chinami(repo, timeout: int = _PROJECTS_GIT_TIMEOUT) -> dict:
+    """采集单个仓库的只读事实。**只读且不改仓库状态**：不写文件、不碰 index、不起 shell。
+
+    HEAD 分支 / 远端 / 浅克隆 / 中途操作 / 残留锁直接读 `.git` 下的小文件，比再起几个 git
+    子进程便宜得多（实测每个 git 子进程约 30~130ms）；只有"有多少改动"必须靠 `git status`。
+    子进程用参数表形式（program 是字面量 `git`，路径只作为 argv 数据），不经过 shell。
+    """
+    repo = Path(repo)
+    out: dict = {"path": repo, "branch": "", "detached": False, "remotes": 0, "shallow": False,
+                 "manifests": [], "dirty": None, "operation": "", "lock_age": None, "error": ""}
+    git_dir = repo / ".git"
+    if git_dir.is_file():
+        try:
+            line = _spade_echo(git_dir.read_bytes()[:4096]).strip()
+            if line.lower().startswith("gitdir:"):
+                target = Path(line.split(":", 1)[1].strip())
+                git_dir = target if target.is_absolute() else (repo / target)
+        except OSError:
+            pass
+    try:
+        head = _spade_echo((git_dir / "HEAD").read_bytes()[:4096]).strip()
+    except OSError:
+        head = ""
+    if head.startswith("ref:"):
+        out["branch"] = head.rsplit("/", 1)[-1].strip()
+    elif len(head) >= 40:
+        out["detached"] = True
+    out["shallow"] = (git_dir / "shallow").is_file()
+    out["operation"] = next((name for marker, name in _PROJECT_OPERATIONS.items()
+                             if (git_dir / marker).exists()), "")
+    try:
+        out["lock_age"] = time.time() - (git_dir / "index.lock").stat().st_mtime
+    except OSError:
+        pass
+    try:
+        cfg_text = _spade_echo((git_dir / "config").read_bytes()[:_PROJECTS_MANIFEST_MAX_BYTES])
+        out["remotes"] = len(re.findall(r'^\[remote\s+"', cfg_text, re.M))
+    except OSError:
+        pass
+    try:
+        with os.scandir(repo) as it:
+            out["manifests"] = sorted(e.name for e in it
+                                      if e.is_file(follow_symlinks=False)
+                                      and e.name in _PROJECT_MANIFESTS)
+    except OSError:
+        pass
+    try:
+        # --no-optional-locks：git status 默认会顺手刷新 index（stat 缓存），那是写操作。
+        # 加上它才是真正的只读诊断——不做任何需要加锁的可选动作。
+        r = subprocess.run(["git", "--no-optional-locks", "-C", str(repo),
+                            "status", "--porcelain", "-z"],
+                           capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        out["error"] = f"status 超时（>{timeout}s）"
+    except OSError as e:
+        out["error"] = f"无法执行 git（{type(e).__name__}）"
+    else:
+        if r.returncode == 0:
+            out["dirty"] = len([x for x in _spade_echo(r.stdout).split("\0") if x])
+        else:
+            lines = _spade_echo(r.stderr).strip().splitlines()
+            out["error"] = (lines or ["git status 返回非零"])[0][:120]
+    return out
+
+
+def naruto_kogane(cfg: dict) -> dict:
+    """项目巡检快照（一次取数、三项共享），按（扫描根, 预算）记忆化。
+
+    `yatogami_fuma` 每轮开跑前会清掉缓存，因此界面重复运行拿到的是新数据，不会用到上一轮的。
+    """
+    roots = [str(r).strip() for r in (cfg.get("scan_roots") or []) if str(r).strip()]
+    if not roots:
+        return {"roots": [], "repos": [], "candidates": 0, "truncated": False, "seconds": 0.0}
+    budget = float(cfg.get("projects_budget_secs") or _PROJECTS_BUDGET_SECONDS)
+    key = (tuple(roots), round(budget, 3))
+    if _PROJECTS_CACHE.get("key") == key:
+        return _PROJECTS_CACHE["value"]
+    t0 = time.perf_counter()
+    disc = tsukimi_shizuku(roots, budget)
+    deadline = t0 + budget
+    repos: list[dict] = []
+    truncated = disc["truncated"]
+    for path in disc["repos"][:_PROJECTS_MAX_REPOS]:
+        left = deadline - time.perf_counter()
+        if left <= 0:
+            truncated = True
+            break
+        # 单次调用的超时也要被剩余预算压住：否则一个超慢的仓库能再加 6s
+        repos.append(achikita_chinami(path, timeout=max(1.0, min(_PROJECTS_GIT_TIMEOUT, left))))
+    value = {"roots": roots, "repos": repos, "candidates": len(disc["repos"]),
+             "truncated": truncated, "seconds": time.perf_counter() - t0}
+    _PROJECTS_CACHE["key"] = key
+    _PROJECTS_CACHE["value"] = value
+    return value
+
+
+def naruse_naru(repos, truncated: bool = False) -> tuple[str, list[str], str | None]:
+    """纯函数：把各仓库事实映射为（状态、明细、建议）。
+
+    只有**会挡路或会丢东西**的状态才报 warn：残留 index.lock（所有 git 命令会被拒）、
+    未完成的 merge/rebase（历史停在中途）、detached HEAD（提交会游离）。未提交改动、
+    无远端、浅克隆都是正常工作状态，只记 info —— 见"只在可行动时报 warn/fail"。
+    """
+    if not repos:
+        return "info", ["未在给定扫描根下发现 git 仓库（或扫描已达预算上限）"], None
+    n = len(repos)
+    dirty = [i for i, r in enumerate(repos, 1) if r.get("dirty")]
+    detached = [i for i, r in enumerate(repos, 1) if r.get("detached")]
+    no_remote = [i for i, r in enumerate(repos, 1) if not r.get("remotes")]
+    shallow = [i for i, r in enumerate(repos, 1) if r.get("shallow")]
+    broken = [i for i, r in enumerate(repos, 1) if r.get("operation")]
+    locked = [i for i, r in enumerate(repos, 1)
+              if (r.get("lock_age") or 0) > _PROJECTS_LOCK_STALE_SECONDS]
+    errored = [i for i, r in enumerate(repos, 1) if r.get("error")]
+
+    def tag(ids):
+        head = " ".join(f"#{i}" for i in ids[:_PROJECTS_SAMPLE])
+        return head + (f" …（共 {len(ids)}）" if len(ids) > _PROJECTS_SAMPLE else "")
+
+    detail = [f"仓库 {n} 个：未提交改动 {len(dirty)}、无远端 {len(no_remote)}、浅克隆 {len(shallow)}"
+              + (f"、查询失败 {len(errored)}" if errored else "")]
+    for label, ids in (("未完成的 git 操作", broken), ("残留 index.lock", locked),
+                       ("detached HEAD", detached), ("未提交改动", dirty),
+                       ("无远端", no_remote), ("浅克隆", shallow),
+                       ("查询失败", errored)):
+        if ids:
+            detail.append(f"  {label}: {tag(ids)}")
+    if truncated:
+        detail.append(f"  已达预算上限，结果只覆盖前 {n} 个仓库（为下界）")
+    if broken or locked or detached:
+        return "warn", detail[:_PROJECTS_SAMPLE + 2], (
+            "编号按扫描根顺序 + 根内路径字典序。未完成的操作与残留锁会让后续 git 命令失败或丢提交："
+            "先进该仓库跑 git status 看提示；锁超过 3 分钟，确认没有 git 进程残留后再删 index.lock"
+        )
+    return "info", detail[:_PROJECTS_SAMPLE + 2], None
+
+
+def kudo_chitose(name: str, text: str) -> list[tuple[str, str, str]]:
+    """纯函数：按清单文件名解析依赖，返回 `(包名, 版本约束, 精确版本或空串)`。
+
+    只解析**声明的**依赖，不解析传递依赖（那要联网甚至装包，违反"只读诊断不装包"）。
+    解析不出来的行直接跳过——宁可不报，也不把解析残渣当依赖名回显。
+    """
+    deps: list[tuple[str, str, str]] = []
+
+    def add(spec_text: str, ecosystem: str) -> None:
+        m = re.match(r"^\s*([A-Za-z0-9._@/-]+)\s*(.*)$", spec_text.strip())
+        if not m:
+            return
+        pkg, spec = m.group(1), m.group(2).strip()
+        if spec.startswith("["):        # PEP 508 的 extras：uvicorn[standard]==0.30.0
+            spec = spec.split("]", 1)[-1].strip() if "]" in spec else ""
+        spec = spec.rstrip(",")
+        if not pkg or pkg.startswith(("-", "http", "git+")):
+            return
+        pin = ""
+        if ecosystem == "python" and re.fullmatch(r"==[0-9][\w.]*", spec):
+            pin = spec[2:]
+        elif ecosystem == "npm" and re.fullmatch(r"\d+\.\d+\.\d+", spec):
+            pin = spec
+        elif ecosystem == "go" and re.fullmatch(r"v\d+\.\d+\.\d+", spec):
+            pin = spec
+        deps.append((pkg, spec, pin))
+
+    if name == "requirements.txt":
+        for line in text.splitlines():
+            line = line.split("#", 1)[0].strip()
+            if not line or line.startswith(("-", "http", "git+")) or "://" in line:
+                continue
+            add(line.split(";", 1)[0], "python")
+    elif name == "package.json":
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            return []
+        if not isinstance(data, dict):
+            return []
+        for key in ("dependencies", "devDependencies"):
+            block = data.get(key)
+            if isinstance(block, dict):
+                for pkg, ver in block.items():
+                    add(f"{pkg} {ver}" if isinstance(ver, str) else str(pkg), "npm")
+    elif name == "go.mod":
+        in_block = False
+        for line in text.splitlines():
+            line = line.split("//", 1)[0].strip()
+            if line.startswith("require ("):
+                in_block = True
+                continue
+            if in_block and line == ")":
+                in_block = False
+                continue
+            if line.startswith("require "):
+                add(line[len("require "):], "go")
+            elif in_block:
+                add(line, "go")
+    elif name in ("pyproject.toml", "Cargo.toml"):
+        try:
+            import tomllib
+        except ImportError:      # Python 3.10 没有 tomllib：跳过而不是猜
+            return []
+        try:
+            data = tomllib.loads(text)
+        except (ValueError, TypeError):
+            return []
+        if name == "pyproject.toml":
+            project = data.get("project") or {}
+            for item in list(project.get("dependencies") or []):
+                if isinstance(item, str):
+                    add(item, "python")
+            for group in (project.get("optional-dependencies") or {}).values():
+                for item in list(group or []):
+                    if isinstance(item, str):
+                        add(item, "python")
+        else:
+            for section in ("dependencies", "dev-dependencies", "build-dependencies"):
+                for pkg, spec in (data.get(section) or {}).items():
+                    add(f"{pkg} {spec if isinstance(spec, str) else ''}", "cargo")
+    return deps
+
+
+def warabeda_meiji(entries) -> dict:
+    """纯函数：跨项目的依赖共存分析。
+
+    `entries` 是可迭代的 `(仓库编号, 包名, 精确版本或空串)`。只对**精确钉死**的版本判互斥：
+    范围约束之间是否相容需要真正的求解器（Cargo 的裸版本号本身也是 caret 语义），
+    这里不做——宁可不报，也不报错的。`shared` 给出跨项目共用最多的包，那才是环境视角下要紧的。
+    """
+    pins: dict[str, dict[int, str]] = {}
+    counts: dict[str, set[int]] = {}
+    total = 0
+    for idx, pkg, pin in entries:
+        total += 1
+        counts.setdefault(pkg, set()).add(idx)
+        if pin:
+            pins.setdefault(pkg, {}).setdefault(idx, pin)
+    conflicts = [(pkg, sorted(by_repo.items())) for pkg, by_repo in pins.items()
+                 if len(set(by_repo.values())) > 1]
+    conflicts.sort(key=lambda kv: (-len(kv[1]), kv[0]))
+    shared = sorted(((p, len(v)) for p, v in counts.items() if len(v) > 1),
+                    key=lambda kv: (-kv[1], kv[0]))
+    return {"conflicts": conflicts, "shared": shared, "total": total,
+            "pinned": sum(len(v) for v in pins.values())}
+
+
+def _projects_snapshot_or_skip(id_: str, title: str, cfg: dict):
+    """三项共用：拿到快照；未配置扫描根时返回 skip 条目（未配置不是问题）。"""
+    snap = naruto_kogane(cfg)
+    if not snap["roots"]:
+        return None, _doris(id_, title, "skip",
+                            ["未指定扫描根（--scan-root 可重复；默认不扫描本地项目）"])
+    return snap, None
+
+
+def yuzuki_roa(cfg: dict) -> dict:
+    """projects.inventory：给定扫描根下有多少 git 仓库、多少配了远端。"""
+    id_, title = "projects.inventory", "本地项目清点"
+    snap, skip = _projects_snapshot_or_skip(id_, title, cfg)
+    if skip:
+        return skip
+    repos = snap["repos"]
+    with_remote = sum(1 for r in repos if r.get("remotes"))
+    detail = [f"扫描根 {len(snap['roots'])} 个 / 发现仓库 {len(repos)} 个",
+              f"有远端 {with_remote} 个 / 无远端 {len(repos) - with_remote} 个"]
+    if snap["candidates"] > len(repos):
+        detail.append(f"另有 {snap['candidates'] - len(repos)} 个仓库未纳入（可达上限/预算）")
+    detail.append(f"扫描耗时 {snap['seconds']:.1f}s"
+                  + ("（已达上限，为下界）" if snap["truncated"] else ""))
+    return _doris(id_, title, "info", detail)
+
+
+def gundo_mirei(cfg: dict) -> dict:
+    """projects.health：仓库是否卡在中途状态（残留锁 / 未完成操作 / detached HEAD）。"""
+    id_, title = "projects.health", "项目仓库健康度"
+    snap, skip = _projects_snapshot_or_skip(id_, title, cfg)
+    if skip:
+        return skip
+    status_, detail, hint = naruse_naru(snap["repos"], snap["truncated"])
+    return _doris(id_, title, status_, detail, hint=hint)
+
+
+def onomachi_haruka(cfg: dict) -> dict:
+    """projects.deps：仓库根清单里的依赖，以及跨项目的精确版本互斥。
+
+    报告里**不出现项目名与路径**：仓库一律用编号（编号规则见 projects.health 的建议）。
+    依赖名回显（那是可行动信息），远端 URL 从不进入报告。
+    """
+    id_, title = "projects.deps", "跨项目依赖"
+    snap, skip = _projects_snapshot_or_skip(id_, title, cfg)
+    if skip:
+        return skip
+    entries: list[tuple[int, str, str]] = []
+    manifests = 0
+    unreadable = 0
+    for i, r in enumerate(snap["repos"], 1):
+        for mname in r.get("manifests") or []:
+            try:
+                raw = (Path(r["path"]) / mname).read_bytes()[:_PROJECTS_MANIFEST_MAX_BYTES]
+            except OSError:
+                unreadable += 1
+                continue
+            deps = kudo_chitose(mname, _spade_echo(raw))
+            if deps:
+                manifests += 1
+            entries += [(i, pkg, pin) for pkg, _spec, pin in deps]
+    if not manifests:
+        return _doris(id_, title, "info",
+                      [f"仓库 {len(snap['repos'])} 个，均无受支持的根清单文件"
+                       "（requirements.txt / pyproject.toml / package.json / go.mod / Cargo.toml）"])
+    info = warabeda_meiji(entries)
+    detail = [f"已解析清单 {manifests} 份 / 依赖条目 {info['total']} 条"
+              + (f"（{unreadable} 份读取失败）" if unreadable else "")]
+    if info["shared"]:
+        detail.append("跨项目共用最多: "
+                      + "、".join(f"{p}（{n} 个项目）" for p, n in info["shared"][:6]))
+    if info["conflicts"]:
+        detail.append(f"精确版本互斥 {len(info['conflicts'])} 项（同一时间只可能装一个版本）:")
+        for pkg, items in info["conflicts"][:_PROJECTS_SAMPLE]:
+            detail.append("  " + pkg + ": " + "、".join(f"#{i}={v}" for i, v in items))
+        return _doris(
+            id_, title, "warn", detail[:_PROJECTS_SAMPLE + 2],
+            hint="互斥的包在不同项目里钉了不同版本：切换项目时容易装错。"
+                 "要么统一版本，要么让每个项目用独立 venv / node_modules 隔离",
+        )
+    detail.append(f"未发现精确版本互斥（精确钉版本 {info['pinned']} 条）")
+    return _doris(id_, title, "info", detail)
+
+
 # ---------------------------------------------------------------- 注册与运行
 
 _PY_CHECKS = [
@@ -1603,6 +2026,9 @@ _PY_CHECKS = [
     ("toolchains.java_home", "JAVA_HOME 一致性", machita_chima),
     ("toolchains.git_config", "Git 关键配置", belmond_banderas),
     ("self.abi", "核心 ABI 自检", yumeoi_kakeru),
+    ("projects.inventory", "本地项目清点", yuzuki_roa),
+    ("projects.health", "项目仓库健康度", gundo_mirei),
+    ("projects.deps", "跨项目依赖", onomachi_haruka),
 ]
 
 
@@ -1628,6 +2054,9 @@ def yatogami_fuma(
     类别过滤按**每项自己的类别**（id 前缀）判定：Python 侧不再只产出 python 类，
     `env.*` / `hardware.cpu` 等也在这里实现，所以不能用"categories 不含 python 就整体跳过"。
     """
+    # 项目巡检快照按（扫描根, 预算）记忆化，是为了让三项共享同一次扫描；
+    # 每轮开跑前清掉，界面里连点两次"运行"才不会拿到上一轮的仓库状态。
+    _PROJECTS_CACHE.clear()
     results: list[dict] = []
     jobs = [(i, t, f) for i, t, f in _PY_CHECKS]
     for lib in _IMPORT_LIBS:
