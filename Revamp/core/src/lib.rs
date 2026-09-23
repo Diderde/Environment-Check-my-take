@@ -16,6 +16,7 @@ mod checks;
 mod engine;
 mod model;
 mod probes;
+mod winreg;
 
 use engine::RanMitake;
 use std::ffi::{c_char, CStr, CString};

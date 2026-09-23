@@ -53,6 +53,12 @@ pub enum AyaMaruyama {
     Conda,
     Poetry,
     Pipenv,
+    /// CUDA 编译器（--version）
+    Nvcc,
+    /// VS Build Tools 定位器（安装到固定位置）
+    Vswhere,
+    /// Kubernetes CLI（--version --client 只查客户端，不触集群）
+    Kubectl,
 }
 
 /// Windows 上按 PATHEXT 在 PATH 中解析可执行文件。
@@ -181,6 +187,12 @@ impl AyaMaruyama {
             AyaMaruyama::Conda => sakamata_chloe("conda", &["--version"]),
             AyaMaruyama::Poetry => sakamata_chloe("poetry", &["--version"]),
             AyaMaruyama::Pipenv => sakamata_chloe("pipenv", &["--version"]),
+            AyaMaruyama::Nvcc => sakamata_chloe("nvcc", &["--version"]),
+            AyaMaruyama::Vswhere => sakamata_chloe(
+                "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe",
+                &["-latest", "-property", "installationVersion"],
+            ),
+            AyaMaruyama::Kubectl => sakamata_chloe("kubectl", &["version", "--client"]),
         }
     }
 
@@ -199,6 +211,9 @@ impl AyaMaruyama {
             AyaMaruyama::Make => "make",
             AyaMaruyama::DotNet => "dotnet",
             AyaMaruyama::Python => "python",
+            AyaMaruyama::Nvcc => "nvcc",
+            AyaMaruyama::Vswhere => "vswhere",
+            AyaMaruyama::Kubectl => "kubectl",
             _ => "",
         }
     }

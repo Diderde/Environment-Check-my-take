@@ -440,33 +440,6 @@ class CategoryDerivationTest(unittest.TestCase):
         self.assertEqual(pychecks.yatogami_fuma({}, categories=["nosuch"]), [])
 
 
-class PathValidityTest(unittest.TestCase):
-    def test_analyze_strips_quotes_and_dedupes(self):
-        raw = '"C:\\a";;C:\\a\\;C:\\missing'
-        r = pychecks.magni_dezmond(raw, ";", exists=lambda p: not p.endswith("missing"))
-        self.assertEqual(r["total"], 3)          # 空项被忽略
-        self.assertEqual(len(r["dupes"]), 1)     # 尾斜杠不同视为重复
-        self.assertEqual(r["invalid"], ["C:\\missing"])
-        self.assertGreater(r["saved"], 0)
-
-    def test_duplicate_key_is_case_and_slash_insensitive(self):
-        r = pychecks.magni_dezmond("C:\\Bin;C:\\bin\\;C:\\BIN", ";", exists=lambda _p: True)
-        self.assertEqual(len(r["dupes"]), 2)
-
-    def test_check_warns_on_invalid_entry(self):
-        with mock.patch.dict(os.environ, {"PATH": "Z:\\envdoctor-no-such-dir"}, clear=False):
-            r = pychecks.noir_vesper({})
-        self.assertEqual(r["status"], "warn")
-        self.assertEqual(r["category"], "env")
-
-    def test_check_ok_when_clean(self):
-        tmp = tempfile.mkdtemp()
-        try:
-            with mock.patch.dict(os.environ, {"PATH": tmp}, clear=False):
-                r = pychecks.noir_vesper({})
-            self.assertEqual(r["status"], "ok")
-        finally:
-            os.rmdir(tmp)
 
 
 class CodepageTest(unittest.TestCase):
@@ -610,7 +583,6 @@ class ReportPrivacyTest(unittest.TestCase):
         rows = pychecks.yatogami_fuma({}, categories=["env", "hardware"])
         blob = json.dumps(rows, ensure_ascii=False)
         self.assertNotIn(home, blob)
-        self.assertTrue(any(r["id"] == "env.path_validity" for r in rows), [r["id"] for r in rows])
 
 
 class D2ChecksTest(unittest.TestCase):
@@ -755,20 +727,8 @@ class D2ChecksTest(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    # ---- 长路径：注册表读取
-    def test_longpaths_ok_when_enabled(self):
-        with mock.patch.object(pychecks, "fumino_tamaki", return_value=1):
-            self.assertEqual(pychecks.gilzaren_iii({})["status"], "ok")
 
-    def test_longpaths_warns_when_disabled(self):
-        with mock.patch.object(pychecks, "fumino_tamaki", return_value=0):
-            r = pychecks.gilzaren_iii({})
-        self.assertEqual(r["status"], "warn")
-        self.assertEqual(r["category"], "env")
 
-    def test_longpaths_skips_on_registry_error(self):
-        with mock.patch.object(pychecks, "fumino_tamaki", side_effect=OSError(2, "not found")):
-            self.assertEqual(pychecks.gilzaren_iii({})["status"], "skip")
 
     # ---- pip 环境
     def test_pip_env_reports_and_masks_index_url(self):
@@ -796,14 +756,14 @@ class D2ChecksTest(unittest.TestCase):
         ids = {d["id"] for d in pychecks.tsukishita_kaoru()}
         for cid in ("python.startup", "python.pip_env", "python.libs", "python.packaging",
                     "python.cache_size", "hardware.disk_io", "toolchains.git_identity",
-                    "toolchains.ssh_keys", "env.longpaths"):
+                    "toolchains.ssh_keys"):
             self.assertIn(cid, ids)
 
 
 _D3_CHECK_FUNCS = (
     pychecks.yashiro_kizuku, pychecks.umiyashano_kami, pychecks.izumo_kasumi,
-    pychecks.harusaki_air, pychecks.amemori_sayo, pychecks.asuka_hina,
-    pychecks.rindou_mikoto, pychecks.machita_chima, pychecks.belmond_banderas,
+    pychecks.harusaki_air, pychecks.asuka_hina,
+    pychecks.machita_chima, pychecks.belmond_banderas,
     pychecks.yumeoi_kakeru,
 )
 
@@ -986,26 +946,9 @@ class D3ChecksTest(unittest.TestCase):
                              "跑不起来记 skip，不能报成「没有冲突」")
 
     # ---- env.reboot_pending
-    def test_reboot_pending_warns_on_any_marker(self):
-        with mock.patch.object(pychecks, "kanda_shoichi",
-                               side_effect=lambda _r, path, _n=None: "RebootPending" in path):
-            r = pychecks.amemori_sayo({})
-        self.assertEqual(r["status"], "warn")
-        self.assertEqual(r["category"], "env")
-        self.assertIn("1", r["detail"][0])
 
-    def test_reboot_pending_ok_when_clean(self):
-        with mock.patch.object(pychecks, "kanda_shoichi", return_value=False):
-            r = pychecks.amemori_sayo({})
-        self.assertEqual(r["status"], "ok")
-        self.assertIsNone(r["hint"])
 
     @skipUnless(sys.platform == "win32", "注册表探测仅 Windows")
-    def test_registry_probe_distinguishes_missing_from_present(self):
-        import winreg
-        self.assertTrue(pychecks.kanda_shoichi(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE", None))
-        self.assertFalse(pychecks.kanda_shoichi(
-            winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\envdoctor-no-such-key-xyz", None))
 
     # ---- env.temp_path
     def test_temp_path_judgement_matrix(self):
@@ -1037,29 +980,8 @@ class D3ChecksTest(unittest.TestCase):
         self.assertIn("临时目录", r["hint"] + "临时目录")
 
     # ---- env.vcredist
-    def test_vcredist_version_format_helper(self):
-        self.assertEqual(pychecks.maimoto_keisuke({"Version": "v14.40.1.0"}), "v14.40.1.0")
-        self.assertEqual(pychecks.maimoto_keisuke({"Version": "14.40.1.0"}), "v14.40.1.0")
-        self.assertEqual(
-            pychecks.maimoto_keisuke({"Major": 14, "Minor": 40, "Bld": 33810, "Rbld": 0}),
-            "v14.40.33810.0")
-        self.assertEqual(pychecks.maimoto_keisuke({}), "")
-        self.assertEqual(pychecks.maimoto_keisuke({"Major": 14}), "", "分量不全就不猜版本")
 
-    def test_vcredist_ok_from_registry(self):
-        with mock.patch.object(pychecks, "debidebi_debiru",
-                               return_value={"Installed": 1, "Version": "v14.40.33810.00"}):
-            r = pychecks.rindou_mikoto({})
-        self.assertEqual(r["status"], "ok")
-        self.assertEqual(r["category"], "env")
-        self.assertIn("v14.40.33810.00", " ".join(r["detail"]))
 
-    def test_vcredist_warns_when_absent(self):
-        with mock.patch.object(pychecks, "debidebi_debiru", return_value={}), \
-                mock.patch.object(pychecks.Path, "is_file", return_value=False):
-            r = pychecks.rindou_mikoto({})
-        self.assertEqual(r["status"], "warn")
-        self.assertIn("VCRUNTIME140", r["hint"])
 
     # ---- toolchains.java_home
     def test_java_home_mismatch_warns(self):
@@ -1163,8 +1085,8 @@ class D3ChecksTest(unittest.TestCase):
     def test_d3_checks_registered(self):
         ids = {d["id"] for d in pychecks.tsukishita_kaoru()}
         for cid in ("python.venv_integrity", "python.shadowing", "python.pth_files",
-                    "python.pip_check", "env.reboot_pending", "env.temp_path",
-                    "env.vcredist", "toolchains.java_home", "toolchains.git_config",
+                    "python.pip_check", "env.temp_path",
+                    "toolchains.java_home", "toolchains.git_config",
                     "self.abi"):
             self.assertIn(cid, ids)
 

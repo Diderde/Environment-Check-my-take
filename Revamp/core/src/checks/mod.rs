@@ -5,6 +5,7 @@
 
 pub mod containers;
 pub mod databases;
+pub mod env;
 pub mod hardware;
 pub mod network;
 pub mod toolchains;
@@ -58,6 +59,7 @@ impl SaayaYamabuki {
 
 pub fn ookami_mio() -> Vec<SaayaYamabuki> {
     let mut v = Vec::new();
+    v.extend(env::tokino_sora());
     v.extend(hardware::tokino_sora());
     v.extend(toolchains::tokino_sora());
     v.extend(network::tokino_sora());
