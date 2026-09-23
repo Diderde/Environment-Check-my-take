@@ -32,6 +32,9 @@ from envdoctor.merge import kobo_kanaeru
 
 PYTHON_CATEGORY = "python"
 
+# 列表类明细每项的条数上限：detail 按"一条一行"渲染，无限列会把报告撑成一堵墙
+_PATH_LIST_MAX = 3
+
 _COLD_IMPORT_CODE = (
     "import sys, time\n"
     "t = time.perf_counter()\n"
@@ -138,7 +141,9 @@ def kanade_izuru(cfg: dict) -> dict:
     if sys.platform == "win32":
         r = subprocess.run(["where.exe", "python"], capture_output=True, timeout=8)
         found = [l.strip() for l in _spade_echo(r.stdout).splitlines() if l.strip()]
-        detail = [f"where python: {p}" for p in found]
+        detail = [f"where python: {p}" for p in found[:_PATH_LIST_MAX]]
+        if len(found) > _PATH_LIST_MAX:
+            detail.append(f"…另有 {len(found) - _PATH_LIST_MAX} 个未列出")
         # WindowsApps 下的商店存根不是真解释器，不计入多版本数量
         ignored_stubs = 0
         winapps = os.environ.get("LOCALAPPDATA")
@@ -152,13 +157,18 @@ def kanade_izuru(cfg: dict) -> dict:
         py = shutil.which("py")
         if py:
             r2 = subprocess.run(["py", "-0p"], capture_output=True, timeout=8)
-            listing = _spade_echo(r2.stdout).strip()
-            if listing:
-                detail.append("py launcher:\n    " + listing.replace("\n", "\n    "))
+            rows = [l.strip() for l in _spade_echo(r2.stdout).splitlines() if l.strip()]
+            if rows:
+                # 一个解释器一条：detail 的契约是"单行"。旧版把整段列表内嵌换行塞进一条，
+                # 单条长度直接失控（实测 205 字符 / 4 个视觉行），也破坏了"·"前缀的排版。
+                detail.append("py launcher:")
+                detail += [f"  {l}" for l in rows[:_PATH_LIST_MAX]]
+                if len(rows) > _PATH_LIST_MAX:
+                    detail.append(f"  …另有 {len(rows) - _PATH_LIST_MAX} 个")
     else:
         found = [shutil.which(p) or "" for p in ("python3", "python")]
         found = [p for p in found if p]
-        detail = [f"解释器: {p}" for p in found]
+        detail = [f"解释器: {p}" for p in found[:_PATH_LIST_MAX]]
     if len(found) > 2:
         return _doris("python.multiplicity", "Python 多版本共存", "warn", detail,
                     hint="多个 python 共存容易装错环境；建议固定用 py launcher / venv / conda 管理并显式指定解释器")
@@ -266,16 +276,19 @@ def astel_leda(cfg: dict) -> dict:
         if m:
             index = m.group(1).strip("'\"")
     base = (index or "https://pypi.org/simple").rstrip("/")
+    # 请求用**真实** base（带凭据才能访问私有源），但报告里一律只出现脱敏形态：
+    # 下面的可达/不可达两行同样会回显这个地址，漏一处就等于把 token 写进报告。
+    shown = kobo_kanaeru(base)
     detail = [f"当前 index-url: {kobo_kanaeru(index) if index else '默认 (pypi.org)'}"]
     try:
         t0 = time.perf_counter()
         with urllib.request.urlopen(f"{base}/simple/", timeout=8):
             pass
         ms = (time.perf_counter() - t0) * 1000
-        detail.append(f"GET {base}/simple/ 可达（{ms:.0}ms）")
+        detail.append(f"GET {shown}/simple/ 可达（{ms:.0}ms）")
         return _doris("python.mirror", "包镜像源", "ok", detail)
     except Exception as e:
-        detail.append(f"{base} 不可达: {type(e).__name__}")
+        detail.append(f"{shown} 不可达: {type(e).__name__}")
         return _doris("python.mirror", "包镜像源", "warn", detail,
                     hint="换用可达的镜像源：pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple")
 

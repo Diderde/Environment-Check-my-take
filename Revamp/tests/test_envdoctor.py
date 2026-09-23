@@ -1554,5 +1554,198 @@ class ProjectsChecksTest(unittest.TestCase):
         self.assertIn("projects", cli.CATEGORIES, "新类别必须进展示层的类别表")
 
 
+class LegacyPyCheckCoverageTest(unittest.TestCase):
+    """补齐 D1 期九项检查的单测：此前只有它们的纯函数被覆盖，检查本体没人守。"""
+
+    class _StubVersion:
+        def __init__(self, major, minor):
+            self.major, self.minor = major, minor
+
+    class _StubResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    # ---- python.interpreter
+    def test_interpreter_follows_version_branch(self):
+        for major, minor, want in ((3, 8, "warn"), (3, 9, "warn"), (3, 10, "warn"),
+                                   (3, 11, "ok"), (3, 12, "ok")):
+            with mock.patch.object(pychecks.sys, "version_info", self._StubVersion(major, minor)):
+                r = pychecks.artia({})
+            self.assertEqual(r["status"], want, f"{major}.{minor}")
+        self.assertEqual(pychecks.artia({})["category"], "python")
+
+    # ---- python.multiplicity
+    def _multiplicity(self, where_lines, launcher_lines=0, local_appdata=None, py="C:\\py.exe"):
+        where = subprocess.CompletedProcess([], 0, "".join(f"{p}\n" for p in where_lines).encode(), b"")
+        launcher = subprocess.CompletedProcess(
+            [], 0, "".join(f" -V:3.{i}  C:\\p{i}\\python.exe\n" for i in range(launcher_lines)).encode(), b"")
+        env = {} if local_appdata is None else {"LOCALAPPDATA": local_appdata}
+        with mock.patch.object(pychecks.subprocess, "run", side_effect=[where, launcher]), \
+                mock.patch.object(pychecks.shutil, "which", return_value=py), \
+                mock.patch.dict(os.environ, env):
+            return pychecks.kanade_izuru({})
+
+    @skipUnless(sys.platform == "win32", "多版本探测走 where.exe，仅 Windows")
+    def test_multiplicity_threshold_and_store_stub_exclusion(self):
+        r = self._multiplicity([r"C:\a\python.exe", r"C:\b\python.exe"], py=None)
+        self.assertEqual(r["status"], "ok")
+        r = self._multiplicity([r"C:\a\python.exe", r"C:\b\python.exe", r"C:\c\python.exe"], py=None)
+        self.assertEqual(r["status"], "warn")
+        # WindowsApps 下的商店存根不计入多版本数量
+        wa = r"C:\Users\x\AppData\Local\Microsoft\WindowsApps"
+        r = self._multiplicity(
+            [rf"{wa}\python.exe", rf"{wa}\python3.exe", r"C:\real\python.exe"],
+            local_appdata=r"C:\Users\x\AppData\Local", py=None)
+        self.assertEqual(r["status"], "ok", "两个存根 + 一个真解释器不该判多版本")
+        self.assertIn("Store 存根", " ".join(r["detail"]))
+
+    @skipUnless(sys.platform == "win32", "多版本探测走 where.exe，仅 Windows")
+    def test_multiplicity_detail_is_single_line_and_bounded(self):
+        # 回归：旧版把 py launcher 列表内嵌换行塞进一条 detail，单条 205 字符 / 4 视觉行
+        r = self._multiplicity([r"C:\a\python.exe"], launcher_lines=9)
+        self.assertTrue(all("\n" not in d for d in r["detail"]), r["detail"])
+        self.assertTrue(all(len(d) <= 200 for d in r["detail"]), max(len(d) for d in r["detail"]))
+        self.assertLessEqual(len(r["detail"]), 9, r["detail"])
+        self.assertTrue(any("另有" in d for d in r["detail"]), "超量必须给出省略提示")
+
+    # ---- python.pip
+    def test_pip_version_threshold(self):
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(True, "pip 22.3.1 from X")):
+            r = pychecks.hanasaki_miyabi({})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("pip install -U pip", r["hint"])
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(True, "pip 25.0.1 from X")):
+            self.assertEqual(pychecks.hanasaki_miyabi({})["status"], "ok")
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(False, "boom")):
+            r = pychecks.hanasaki_miyabi({})
+        self.assertEqual(r["status"], "fail")
+        self.assertIn("ensurepip", r["hint"])
+
+    # ---- python.path
+    def test_path_warns_on_pythonhome(self):
+        with mock.patch.dict(os.environ, {"PYTHONHOME": r"C:\Python312", "PYTHONPATH": ""}):
+            r = pychecks.arurandeisu({})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("PYTHONHOME", " ".join(r["detail"]))
+
+    def test_path_warns_on_duplicate_entries(self):
+        with mock.patch.dict(os.environ, {"PYTHONHOME": "", "PYTHONPATH": ""}), \
+                mock.patch.object(pychecks.sys, "path", [r"C:\a", r"c:\A", r"C:\b"]):
+            r = pychecks.arurandeisu({})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("重复", " ".join(r["detail"]))
+
+    def test_path_ok_when_clean(self):
+        with mock.patch.dict(os.environ, {"PYTHONHOME": "", "PYTHONPATH": ""}), \
+                mock.patch.object(pychecks.sys, "path", [r"C:\a", r"C:\b"]):
+            r = pychecks.arurandeisu({})
+        self.assertEqual(r["status"], "ok")
+
+    # ---- python.packages
+    def test_packages_counts_and_handles_timeout(self):
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(True, "a==1\nb==2\nc==3")):
+            r = pychecks.kagami_kira({})
+        self.assertEqual(r["status"], "ok")
+        self.assertIn("包总数: 3", r["detail"][0])
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(False, "boom")):
+            self.assertEqual(pychecks.kagami_kira({})["status"], "warn")
+        with mock.patch.object(pychecks, "_rosalyn",
+                               side_effect=subprocess.TimeoutExpired("x", 1)):
+            r = pychecks.kagami_kira({"timeout_secs": 5})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("超时", r["detail"][0])
+
+    # ---- python.outdated
+    def test_outdated_distinguishes_failure_from_up_to_date(self):
+        with mock.patch.object(pychecks, "_rosalyn",
+                               return_value=(True, json.dumps([{"name": "x"}, {"name": "y"}]))):
+            r = pychecks.yakushiji_suzaku({})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("2 个过时包", r["detail"][0])
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(True, "[]")):
+            r = pychecks.yakushiji_suzaku({})
+        self.assertEqual(r["status"], "ok")
+        self.assertIn("最新", r["detail"][0])
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(True, "not json")):
+            r = pychecks.yakushiji_suzaku({})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("无法解析", " ".join(r["detail"]), "解析失败不能写成所有包都是最新的")
+        with mock.patch.object(pychecks, "_rosalyn", side_effect=subprocess.TimeoutExpired("x", 1)):
+            self.assertEqual(pychecks.yakushiji_suzaku({})["status"], "warn")
+
+    # ---- python.mirror
+    def test_mirror_uses_configured_url_and_masks_credentials(self):
+        cfg = "global.index-url='https://bob:tok3n@nexus.corp/simple'"
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(True, cfg)), \
+                mock.patch.object(pychecks.urllib.request, "urlopen",
+                                  return_value=self._StubResp()):
+            r = pychecks.astel_leda({})
+        blob = json.dumps(r, ensure_ascii=False)
+        self.assertEqual(r["status"], "ok")
+        self.assertNotIn("tok3n", blob, "index-url 凭据必须脱敏")
+        self.assertIn("***", blob)
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(True, "")), \
+                mock.patch.object(pychecks.urllib.request, "urlopen", side_effect=OSError("nope")):
+            r = pychecks.astel_leda({})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("镜像", r["hint"])
+        # 回归：设置过带凭据的私有源时，成功/失败两行都会回显该地址，必须同样是脱敏形态
+        with mock.patch.object(pychecks, "_rosalyn", return_value=(True, cfg)), \
+                mock.patch.object(pychecks.urllib.request, "urlopen", side_effect=OSError("nope")):
+            r2 = pychecks.astel_leda({})
+        blob2 = json.dumps(r2, ensure_ascii=False)
+        self.assertNotIn("tok3n", blob2, "不可达那一行同样不能回显凭据")
+        self.assertIn("***", blob2)
+
+    # ---- python.store_alias
+    @skipUnless(sys.platform == "win32", "Store 别名仅 Windows")
+    def test_store_alias_branches(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            alias_dir = tmp / "Microsoft" / "WindowsApps"
+            alias_dir.mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(tmp)}):
+                with mock.patch.object(pychecks.shutil, "which", return_value=None):
+                    self.assertEqual(pychecks.kishido_temma({})["status"], "ok")
+                (alias_dir / "python.exe").write_bytes(b"")
+                with mock.patch.object(pychecks.shutil, "which",
+                                       return_value=str(alias_dir / "python.exe")):
+                    r = pychecks.kishido_temma({})
+                self.assertEqual(r["status"], "warn")
+                self.assertIn("应用执行别名", r["hint"])
+                with mock.patch.object(pychecks.shutil, "which", return_value=r"C:\Other\python.exe"):
+                    self.assertEqual(pychecks.kishido_temma({})["status"], "info")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": ""}):
+                self.assertEqual(pychecks.kishido_temma({})["status"], "skip")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- network.hosts
+    def test_hosts_check_counts_without_leaking_content(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            hosts_dir = tmp / "System32" / "drivers" / "etc"
+            hosts_dir.mkdir(parents=True)
+            (hosts_dir / "hosts").write_text(
+                "# comment\n127.0.0.1 localhost\n10.0.0.5 internal.corp.local\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"SystemRoot": str(tmp)}):
+                r = pychecks.josuiji_shinri({})
+            blob = json.dumps(r, ensure_ascii=False)
+            self.assertEqual(r["status"], "info")
+            self.assertEqual(r["category"], "network")
+            self.assertIn("2 条", blob)
+            self.assertNotIn("internal.corp.local", blob, "不得回显映射内容")
+            self.assertNotIn("10.0.0.5", blob)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_hosts_check_skips_when_file_missing(self):
+        with mock.patch.dict(os.environ, {"SystemRoot": r"Z:\envdoctor-no-such-root"}):
+            self.assertEqual(pychecks.josuiji_shinri({})["status"], "skip")
+
+
 if __name__ == "__main__":
     unittest.main()
