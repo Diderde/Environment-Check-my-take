@@ -16,7 +16,12 @@ pub mod status {
 }
 
 /// 运行配置，由 Python 侧以 JSON 传入。
+///
+/// `#[serde(default)]`：字段缺失一律取默认值（`{}` 等价于全默认），因此"空配置"
+/// 不会被判成解析错误；但**类型写错**（如 `timeout_secs: -1`）仍会报错并被
+/// `lib.rs` 显式转成报告 error —— 不再静默回退成"跑全量"。
 #[derive(Deserialize, Default, Clone)]
+#[serde(default)]
 pub struct Config {
     /// 只跑这些类别；None = 全部
     pub categories: Option<Vec<String>>,
@@ -168,5 +173,29 @@ mod tests {
         let s = serde_json::to_string(&r).expect("serialize");
         assert!(s.contains("\"results\""));
         assert!(s.contains("\"summary\""));
+    }
+
+    #[test]
+    fn empty_config_object_is_all_defaults() {
+        // Python 侧 Core.run(None) 会送 "{}"：必须解析成功（否则会把"没配置"判成配错）
+        let c: Config = serde_json::from_str("{}").expect("空对象应解析为全默认");
+        assert!(c.categories.is_none());
+        assert!(c.timeout_secs.is_none());
+    }
+
+    #[test]
+    fn null_valued_config_is_all_defaults() {
+        // Python 侧 json.dumps({"categories": None, ...}) 会送 null
+        let c: Config =
+            serde_json::from_str(r#"{"categories":null,"required":null,"net_full":null,"timeout_secs":null}"#)
+                .expect("null 应解析为 None");
+        assert!(c.categories.is_none());
+        assert_eq!(c.net_full, None);
+    }
+
+    #[test]
+    fn wrong_typed_config_is_an_error_not_silent_default() {
+        // 类型写错必须报错，交由 lib.rs 转成报告 error（旧版在这里静默跑全量）
+        assert!(serde_json::from_str::<Config>(r#"{"timeout_secs":-1}"#).is_err());
     }
 }

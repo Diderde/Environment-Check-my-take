@@ -6,9 +6,11 @@
 //! 相对旧版的修复：
 //! - 进度按"已完成数/总数"回调，不再按项数静止僵住；
 //! - 取消令牌在派发前检查，取消后剩余项记 SKIP（旧版刷新会产生双链竞争）；
-//! - 超时项显式标记 timeout 状态与 error 字段，不再和"未检测到"混在一起。
+//! - 超时项显式标记 timeout 状态与 error 字段，不再和"未检测到"混在一起；
+//! - 检查线程内的 panic 被捕获并记为 fail（见 `run_one`），不再伪装成超时；
+//! - "结果通道断开"与"超时"分开记录，避免把线程异常消失误报成"检查太慢"。
 
-use crate::checks::{self, CheckDef};
+use crate::checks::{self, CheckDef, CheckOut};
 use crate::model::{status, Config, Outcome, Report};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,6 +52,50 @@ pub fn platform_name() -> &'static str {
 
 pub type Progress<'a> = &'a (dyn Fn(u32, u32, &str) + Sync);
 
+/// 从 panic payload 里取出可读信息（`panic!("…")` 与 `panic!("{}", x)` 两种形态都覆盖）。
+pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "未知 panic（payload 不是字符串）".to_string()
+    }
+}
+
+/// 执行单个检查项，并把**检查函数自身的 panic** 转成显式的 fail 结果。
+///
+/// 必要性：`lib.rs` 的 `catch_unwind` 只罩得住调用线程；检查跑在各自的 `thread::spawn`
+/// 里，一旦 panic，结果永远送不进通道，收集循环只能按超时收尾 —— 于是"代码崩了"和
+/// "检查太慢"在报告里长得一模一样（都显示"线程未返回"），把排查方向带偏。
+fn run_one(
+    func: fn(&Config) -> CheckOut,
+    id: &str,
+    title: &str,
+    category: &str,
+    cfg: &Config,
+) -> Outcome {
+    let t1 = Instant::now();
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| func(cfg)));
+    let mut o = match outcome {
+        Ok(out) => {
+            let mut o = Outcome::new(id, title, category, out.status);
+            o.detail = out.detail;
+            o.hint = out.hint;
+            o
+        }
+        Err(payload) => {
+            let mut o = Outcome::new(id, title, category, status::FAIL);
+            o.detail.push(format!("检查线程 panic: {}", panic_message(&*payload)));
+            o.error = Some("panic".into());
+            o.hint = Some("这是检查项自身的缺陷，请带上该 id 与复现步骤上报".into());
+            o
+        }
+    };
+    o.duration_ms = t1.elapsed().as_secs_f64() * 1000.0;
+    o
+}
+
 pub fn run(
     config: &Config,
     cancel: Option<&CancelToken>,
@@ -83,12 +129,7 @@ pub fn run(
         let title = def.title.to_string();
         let category = def.category.to_string();
         thread::spawn(move || {
-            let t1 = Instant::now();
-            let out = func(&cfg);
-            let mut o = Outcome::new(&id, &title, &category, out.status);
-            o.detail = out.detail;
-            o.hint = out.hint;
-            o.duration_ms = t1.elapsed().as_secs_f64() * 1000.0;
+            let o = run_one(func, &id, &title, &category, &cfg);
             let _ = tx_c.send(o);
         });
     }
@@ -98,6 +139,9 @@ pub fn run(
     let budget = per_check.saturating_mul(total.max(1));
     let deadline = Instant::now() + budget;
     let mut received: Vec<Outcome> = Vec::with_capacity(total as usize);
+    // 通道断开（所有检查线程都已退出却没送齐结果）与"超时"是两回事，必须分开记，
+    // 否则会把"线程异常消失"误报成"检查太慢"。
+    let mut channel_dropped = false;
     while received.len() < total as usize {
         // 取消后立即停止收集：未返回的项在下方统一记 SKIP
         if cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
@@ -115,7 +159,11 @@ pub fn run(
                     p(received.len() as u32, total, &last.id);
                 }
             }
-            Err(_) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                channel_dropped = true;
+                break;
+            }
         }
     }
 
@@ -127,6 +175,10 @@ pub fn run(
             let mut o = Outcome::new(def.id, def.title, def.category, status::SKIP);
             if cancelled_now {
                 o.detail.push("已取消".into());
+            } else if channel_dropped {
+                o.status = status::FAIL.to_string();
+                o.error = Some("worker_disconnected".into());
+                o.detail.push("检查线程未回传结果（结果通道已断开）".into());
             } else {
                 o.status = status::TIMEOUT.to_string();
                 o.detail.push(format!("检测超时（预算 {}s，线程未返回）", per_check.as_secs()));
@@ -172,5 +224,28 @@ mod tests {
         let report = run(&cfg, Some(&token), None);
         assert!(!report.results.is_empty());
         assert!(report.results.iter().all(|r| r.status == status::SKIP));
+    }
+
+    #[test]
+    fn panic_in_check_is_reported_as_fail_not_timeout() {
+        fn boom(_cfg: &Config) -> checks::CheckOut {
+            panic!("故意炸一次");
+        }
+        let o = run_one(boom, "x.boom", "炸弹", "test", &Config::default());
+        assert_eq!(o.status, status::FAIL, "panic 必须显式记为 fail");
+        assert_eq!(o.error.as_deref(), Some("panic"));
+        assert!(
+            o.detail.iter().any(|d| d.contains("故意炸一次")),
+            "detail 应带出 panic 信息: {:?}",
+            o.detail
+        );
+    }
+
+    #[test]
+    fn panic_message_covers_str_and_string_payloads() {
+        let a: Box<dyn std::any::Any + Send> = Box::new("静态");
+        let b: Box<dyn std::any::Any + Send> = Box::new(String::from("动态"));
+        assert_eq!(panic_message(&*a), "静态");
+        assert_eq!(panic_message(&*b), "动态");
     }
 }

@@ -72,9 +72,14 @@ class EnvDoctorTUI(App[None]):
         self._token = token
         try:
             def cb(done: int, total: int, current: str) -> None:
-                self.app.call_from_thread(
-                    self._set_status, f"正在检测 {current}（{done}/{total}）"
-                )
+                # 回调在 Rust 引擎线程里执行；这里抛异常会被 ctypes 吞掉并打 stderr，
+                # 界面侧的问题就地消化。
+                try:
+                    self.app.call_from_thread(
+                        self._set_status, f"正在检测 {current}（{done}/{total}）"
+                    )
+                except RuntimeError:
+                    pass  # 应用已退出
 
             self.app.call_from_thread(self._set_status, "Rust 核心并发检测中…")
             rust_report = self.core.run({"timeout_secs": 25}, progress=cb, cancel=token)

@@ -1,10 +1,29 @@
 # Copyright (C) 2026 Diderde
 # SPDX-License-Identifier: MIT
-"""合并 Rust 报告与 Python 检查结果为统一报告。"""
+"""合并 Rust 报告与 Python 检查结果为统一报告，并提供报告中立化规则。"""
 
 from __future__ import annotations
 
 import time
+
+__all__ = ["merge_reports", "redact_url", "verdict"]
+
+
+def redact_url(value: str) -> str:
+    """抹掉 URL 里的凭据部分（`scheme://user:pass@host` → `scheme://***@host`）。
+
+    与 Rust 侧 `network.rs::mask_credentials` 保持同一规则：按**最后一个** `@` 切分
+    （口令里带 `@` 的情况很常见，按第一个切会把口令尾巴泄进 host），非 URL 形态原样返回。
+    报告会被导出成本地文件或粘贴进 issue，代理地址与私有 index-url 里的
+    `user:token@` 不能明文落进报告。
+    """
+    scheme, sep, rest = value.partition("://")
+    if not sep:
+        return value
+    _creds, at, host = rest.rpartition("@")
+    if not at:
+        return value
+    return f"{scheme}://***@{host}"
 
 
 def merge_reports(rust_report: dict, python_results: list[dict]) -> dict:

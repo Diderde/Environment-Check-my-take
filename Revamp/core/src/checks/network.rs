@@ -89,9 +89,10 @@ fn check_mirror(_cfg: &Config) -> CheckOut {
 }
 
 fn mask_credentials(url: &str) -> String {
-    // 形如 scheme://user:pass@host 的代理地址不回显凭据
+    // 形如 scheme://user:pass@host 的代理地址不回显凭据。
+    // 按**最后一个** `@` 切分：口令里带 `@` 很常见，按第一个切会把口令尾巴泄进 host。
     match url.split_once("://") {
-        Some((scheme, rest)) => match rest.split_once('@') {
+        Some((scheme, rest)) => match rest.rsplit_once('@') {
             Some((_creds, host)) => format!("{scheme}://***@{host}"),
             None => url.to_string(),
         },
@@ -206,5 +207,30 @@ fn check_public_ip(cfg: &Config) -> CheckOut {
         CheckOut::ok(vec![format!("公网 IP: {}", out.stdout.trim())])
     } else {
         CheckOut::skip(vec!["公网 IP 获取失败（curl 缺失或网络不可达）".into()])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credentials_are_masked() {
+        assert_eq!(
+            mask_credentials("http://user:pass@proxy.corp:8080"),
+            "http://***@proxy.corp:8080"
+        );
+        // 口令里带 @：必须按最后一个 @ 切，否则会把口令尾巴当 host 回显
+        assert_eq!(
+            mask_credentials("http://alice:S3cr3tP@ss@proxy.corp:8080"),
+            "http://***@proxy.corp:8080"
+        );
+    }
+
+    #[test]
+    fn non_credential_urls_pass_through() {
+        assert_eq!(mask_credentials("https://pypi.org/simple"), "https://pypi.org/simple");
+        assert_eq!(mask_credentials("localhost,127.0.0.1"), "localhost,127.0.0.1");
+        assert_eq!(mask_credentials(""), "");
     }
 }
