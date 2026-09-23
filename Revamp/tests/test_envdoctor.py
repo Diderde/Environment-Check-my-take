@@ -799,5 +799,399 @@ class D2ChecksTest(unittest.TestCase):
             self.assertIn(cid, ids)
 
 
+_D3_CHECK_FUNCS = (
+    pychecks.yashiro_kizuku, pychecks.umiyashano_kami, pychecks.izumo_kasumi,
+    pychecks.harusaki_air, pychecks.amemori_sayo, pychecks.asuka_hina,
+    pychecks.rindou_mikoto, pychecks.machita_chima, pychecks.belmond_banderas,
+    pychecks.yumeoi_kakeru,
+)
+
+
+class D3ChecksTest(unittest.TestCase):
+    """D3 批：完整性/生态陷阱类检查。取数可注入或可 mock，判定不依赖宿主环境。"""
+
+    # ---- python.venv_integrity
+    def test_venv_cfg_parser_and_zombie_detection(self):
+        text = ("home = C:\\Python312\n"
+                "include-system-site-packages = false\n"
+                "version = 3.12.10\n")
+        alive = pychecks.uzuki_kou(text, exists=lambda p: p.endswith("python.exe"))
+        self.assertEqual(alive["version"], "3.12.10")
+        self.assertEqual(len(alive["candidates"]), 4)
+        self.assertEqual(len(alive["alive"]), 1)
+
+        dead = pychecks.uzuki_kou(text, exists=lambda _p: False)
+        self.assertEqual(dead["alive"], [])
+        self.assertEqual(dead["home"], "C:\\Python312")
+
+    def test_venv_cfg_prefers_base_executable(self):
+        text = "home = C:\\Python312\nbase-executable = D:\\other\\python.exe\n"
+        info = pychecks.uzuki_kou(text, exists=lambda p: p == "D:\\other\\python.exe")
+        self.assertEqual(info["candidates"][0], "D:\\other\\python.exe")
+        self.assertEqual(info["alive"], ["D:\\other\\python.exe"])
+
+    def test_venv_integrity_warns_on_zombie(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "pyvenv.cfg").write_text(
+                "home = Z:\\gone\\Python312\nversion = 3.12.10\n", encoding="utf-8")
+            with mock.patch.object(sys, "prefix", str(tmp)), \
+                    mock.patch.object(sys, "base_prefix", r"C:\Python312"):
+                r = pychecks.yashiro_kizuku({})
+            self.assertEqual(r["status"], "warn")
+            self.assertIn("僵尸", r["hint"])
+            self.assertIn("3.12.10", " ".join(r["detail"]))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_venv_integrity_ok_when_base_present(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "python.exe").write_bytes(b"")
+            (tmp / "pyvenv.cfg").write_text(f"home = {tmp}\n", encoding="utf-8")
+            with mock.patch.object(sys, "prefix", str(tmp)), \
+                    mock.patch.object(sys, "base_prefix", r"C:\Python312"):
+                r = pychecks.yashiro_kizuku({})
+            self.assertEqual(r["status"], "ok")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_venv_integrity_skips_when_not_venv(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            with mock.patch.object(sys, "prefix", str(tmp)), \
+                    mock.patch.object(sys, "base_prefix", str(tmp)):
+                r = pychecks.yashiro_kizuku({})
+            self.assertEqual(r["status"], "skip")
+            self.assertIn("不是 venv", r["detail"][0])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- python.shadowing
+    def test_shadow_targets_exclude_unshadowable_modules(self):
+        names = pychecks.kuroi_shiba()
+        # 冻结模块（FrozenImporter 排在 PathFinder 之前）与内置模块无法被同名文件遮蔽，
+        # 报出来就是纯误报
+        for frozen in ("os", "sys", "abc", "site", "codecs", "io", "time", "stat"):
+            self.assertNotIn(frozen, names, f"{frozen} 不可能被遮蔽")
+        for expected in ("json", "random", "types", "typing", "numpy"):
+            self.assertIn(expected, names)
+
+    def test_shadow_matcher_handles_py_suffix_and_packages(self):
+        names = frozenset({"json", "queue"})
+        self.assertEqual(pychecks.nakao_azuma(["json.py", "queue", "other.py"], names),
+                         ["json.py", "queue"])
+        self.assertEqual(pychecks.nakao_azuma([], names), [])
+        self.assertEqual(pychecks.nakao_azuma(["json"], frozenset()), [])
+
+    def test_shadowing_warns_on_stdlib_name_in_path(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "json.py").write_text("x = 1\n", encoding="utf-8")
+            (tmp / "requests.py").write_text("x = 1\n", encoding="utf-8")
+            (tmp / "harmless.py").write_text("x = 1\n", encoding="utf-8")
+            (tmp / "typing").mkdir()                       # 普通同名目录不遮蔽导入
+            (tmp / "queue").mkdir()
+            (tmp / "queue" / "__init__.py").write_text("", encoding="utf-8")
+            with mock.patch.object(pychecks.Path, "cwd", return_value=tmp), \
+                    mock.patch.dict(os.environ, {"PYTHONPATH": ""}):
+                r = pychecks.umiyashano_kami({})
+            blob = json.dumps(r, ensure_ascii=False)
+            self.assertEqual(r["status"], "warn")
+            self.assertEqual(r["category"], "python")
+            self.assertIn("json.py", blob)
+            self.assertIn("requests.py", blob)
+            self.assertIn("queue", blob)
+            self.assertNotIn("harmless.py", blob)
+            self.assertNotIn("typing", blob, "不含 __init__.py 的同名目录不会遮蔽导入")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_shadowing_ignores_unshadowable_names(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "os.py").write_text("x = 1\n", encoding="utf-8")
+            with mock.patch.object(pychecks.Path, "cwd", return_value=tmp), \
+                    mock.patch.dict(os.environ, {"PYTHONPATH": ""}):
+                r = pychecks.umiyashano_kami({})
+            self.assertEqual(r["status"], "ok")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- python.pth_files
+    def test_pth_parser_counts_paths_and_executable_lines(self):
+        text = ("# comment\n"
+                "\n"
+                "C:\\libs\\a\n"
+                "import os; os.environ['X'] = '1'\n"
+                "exec(compile('1', '<s>', 'exec'))\n")
+        stat = pychecks.hassaku_yuzu(text)
+        self.assertEqual(stat["paths"], 3)
+        self.assertEqual(stat["executable"], 2)
+
+    def test_pth_files_warns_on_executable_hook(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "plain.pth").write_text("C:\\libs\\a\n", encoding="utf-8")
+            (tmp / "hook.pth").write_text("import _envdoctor_hook\n", encoding="utf-8")
+            with mock.patch("sysconfig.get_paths", return_value={"purelib": str(tmp)}):
+                r = pychecks.izumo_kasumi({})
+            blob = json.dumps(r, ensure_ascii=False)
+            self.assertEqual(r["status"], "warn")
+            self.assertIn(".pth 文件 2 个", blob)
+            self.assertIn("含可执行语句的 .pth: 1 个", blob)
+            self.assertNotIn("_envdoctor_hook", blob, "语句内容不回显")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_pth_files_info_when_only_paths(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            (tmp / "plain.pth").write_text("C:\\libs\\a\nC:\\libs\\b\n", encoding="utf-8")
+            with mock.patch("sysconfig.get_paths", return_value={"purelib": str(tmp)}):
+                r = pychecks.izumo_kasumi({})
+            self.assertEqual(r["status"], "info")
+            self.assertIn("全部为纯路径注入", " ".join(r["detail"]))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---- python.pip_check
+    def test_pip_check_ok(self):
+        fake = subprocess.CompletedProcess([], 0, b"", b"")
+        with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+            r = pychecks.harusaki_air({})
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual(r["category"], "python")
+
+    def test_pip_check_warns_with_first_conflict(self):
+        out = (b"WARNING: there is no such warning\n"
+               b"jinja2 3.0.0 requires MarkupSafe, which is not installed.\n"
+               b"foo 1.0 requires bar, which is not installed.\n")
+        fake = subprocess.CompletedProcess([], 1, out, b"")
+        with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+            r = pychecks.harusaki_air({})
+        blob = " ".join(r["detail"])
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("冲突 2 条", blob)
+        self.assertIn("MarkupSafe", blob)
+        self.assertNotIn("no such warning", blob, "只取首条冲突，噪声行不进报告")
+
+    def test_pip_check_timeout_and_missing_pip_are_skip(self):
+        with mock.patch.object(pychecks.subprocess, "run",
+                               side_effect=subprocess.TimeoutExpired("x", 1)):
+            self.assertEqual(pychecks.harusaki_air({})["status"], "skip")
+        with mock.patch.object(pychecks.subprocess, "run", side_effect=FileNotFoundError()):
+            self.assertEqual(pychecks.harusaki_air({})["status"], "skip",
+                             "跑不起来记 skip，不能报成「没有冲突」")
+
+    # ---- env.reboot_pending
+    def test_reboot_pending_warns_on_any_marker(self):
+        with mock.patch.object(pychecks, "kanda_shoichi",
+                               side_effect=lambda _r, path, _n=None: "RebootPending" in path):
+            r = pychecks.amemori_sayo({})
+        self.assertEqual(r["status"], "warn")
+        self.assertEqual(r["category"], "env")
+        self.assertIn("1", r["detail"][0])
+
+    def test_reboot_pending_ok_when_clean(self):
+        with mock.patch.object(pychecks, "kanda_shoichi", return_value=False):
+            r = pychecks.amemori_sayo({})
+        self.assertEqual(r["status"], "ok")
+        self.assertIsNone(r["hint"])
+
+    @skipUnless(sys.platform == "win32", "注册表探测仅 Windows")
+    def test_registry_probe_distinguishes_missing_from_present(self):
+        import winreg
+        self.assertTrue(pychecks.kanda_shoichi(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE", None))
+        self.assertFalse(pychecks.kanda_shoichi(
+            winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\envdoctor-no-such-key-xyz", None))
+
+    # ---- env.temp_path
+    def test_temp_path_judgement_matrix(self):
+        self.assertEqual(pychecks.takamiya_rion(r"C:\Temp", r"C:\Temp", True, True)[0], "ok")
+        self.assertEqual(pychecks.takamiya_rion("", "", False, False)[0], "fail")
+        self.assertEqual(pychecks.takamiya_rion(r"C:\Temp", "", False, False)[0], "fail")
+        self.assertEqual(pychecks.takamiya_rion(r"C:\Temp", "", True, False)[0], "fail")
+        self.assertEqual(pychecks.takamiya_rion("C:\\临时", "", True, True)[0], "warn")
+        over_long = "C:\\" + "a" * 200
+        self.assertEqual(pychecks.takamiya_rion(over_long, "", True, True)[0], "warn")
+        self.assertEqual(len(pychecks.takamiya_rion(over_long, "", True, True)[1]), 3,
+                         "TEMP/TMP 两行 + 判定行")
+
+    def test_temp_path_check_reads_env_and_cleans_up(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch.dict(os.environ, {"TEMP": tmp, "TMP": tmp}):
+                r = pychecks.asuka_hina({})
+            self.assertEqual(r["status"], "ok")
+            self.assertEqual(r["category"], "env")
+            self.assertEqual(list(Path(tmp).glob(".envdoctor*")), [], "探针文件必须清理")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_temp_path_check_fails_when_dir_missing(self):
+        with mock.patch.dict(os.environ, {"TEMP": r"Z:\envdoctor-no-such-dir", "TMP": ""}):
+            r = pychecks.asuka_hina({})
+        self.assertEqual(r["status"], "fail")
+        self.assertIn("临时目录", r["hint"] + "临时目录")
+
+    # ---- env.vcredist
+    def test_vcredist_version_format_helper(self):
+        self.assertEqual(pychecks.maimoto_keisuke({"Version": "v14.40.1.0"}), "v14.40.1.0")
+        self.assertEqual(pychecks.maimoto_keisuke({"Version": "14.40.1.0"}), "v14.40.1.0")
+        self.assertEqual(
+            pychecks.maimoto_keisuke({"Major": 14, "Minor": 40, "Bld": 33810, "Rbld": 0}),
+            "v14.40.33810.0")
+        self.assertEqual(pychecks.maimoto_keisuke({}), "")
+        self.assertEqual(pychecks.maimoto_keisuke({"Major": 14}), "", "分量不全就不猜版本")
+
+    def test_vcredist_ok_from_registry(self):
+        with mock.patch.object(pychecks, "debidebi_debiru",
+                               return_value={"Installed": 1, "Version": "v14.40.33810.00"}):
+            r = pychecks.rindou_mikoto({})
+        self.assertEqual(r["status"], "ok")
+        self.assertEqual(r["category"], "env")
+        self.assertIn("v14.40.33810.00", " ".join(r["detail"]))
+
+    def test_vcredist_warns_when_absent(self):
+        with mock.patch.object(pychecks, "debidebi_debiru", return_value={}), \
+                mock.patch.object(pychecks.Path, "is_file", return_value=False):
+            r = pychecks.rindou_mikoto({})
+        self.assertEqual(r["status"], "warn")
+        self.assertIn("VCRUNTIME140", r["hint"])
+
+    # ---- toolchains.java_home
+    def test_java_home_mismatch_warns(self):
+        status, detail, hint = pychecks.joe_rikiichi(
+            r"C:\jdk17", r"C:\jdk17\bin\java.exe", r"C:\jdk8\bin\java.exe",
+            resolve=lambda p: p.lower())
+        self.assertEqual(status, "warn")
+        self.assertIn("JAVA_HOME", hint)
+        self.assertEqual(len(detail), 3)
+
+    def test_java_home_same_file_is_ok(self):
+        status, _, hint = pychecks.joe_rikiichi(
+            r"C:\jdk17", r"C:\jdk17\bin\java.exe", r"C:\jdk17\bin\JAVA.EXE",
+            resolve=lambda p: p.lower())
+        self.assertEqual(status, "ok")
+        self.assertIsNone(hint)
+
+    def test_java_home_absent_is_info(self):
+        self.assertEqual(pychecks.joe_rikiichi("", "", "")[0], "info")
+        self.assertEqual(pychecks.joe_rikiichi(r"C:\jdk17", "", "")[0], "info")
+        self.assertEqual(pychecks.joe_rikiichi(r"C:\jdk17", r"C:\jdk17\bin\java.exe", "")[0], "info")
+
+    def test_java_home_check_uses_path_lookup(self):
+        with mock.patch.dict(os.environ, {"JAVA_HOME": ""}), \
+                mock.patch.object(pychecks.shutil, "which", return_value=None):
+            r = pychecks.machita_chima({})
+        self.assertEqual(r["status"], "info")
+        self.assertEqual(r["category"], "toolchains")
+
+    # ---- toolchains.git_config
+    def test_git_config_parser_masks_proxy_and_skips_subsection(self):
+        text = ("http.proxy http://alice:S3cr3tP@ss@proxy.corp:8080\n"
+                "https.proxy https://bob:tok3n@nexus.corp:8080\n"
+                "http.https://github.com/.schannelcheckrevoke false\n"
+                "http.https://git.corp.local/.schannelcheckrevoke true\n"
+                "http.sslbackend schannel\n"
+                "core.longpaths true\n"
+                "core.autocrlf false\n"
+                "http.https://github.com/.extraheader AUTHORIZATION: basic SECRET\n")
+        info = pychecks.sakura_ritsuki(text)
+        blob = json.dumps(info, ensure_ascii=False)
+        self.assertNotIn("S3cr3tP@ss", blob)
+        self.assertNotIn("tok3n", blob)
+        self.assertIn("***", blob)
+        self.assertNotIn("github.com", blob, "子段含主机名，只计数不回显")
+        self.assertNotIn("git.corp.local", blob)
+        self.assertNotIn("SECRET", blob, "extraheader 不在关心项内，绝不进报告")
+        self.assertEqual(info["revoked"], 1, "只数 =false 的那条")
+        self.assertEqual(info["scalars"]["core.longpaths"], "true")
+        self.assertEqual(info["scalars"]["http.sslbackend"], "schannel")
+
+    def test_git_config_check_is_info_and_masks_values(self):
+        out = b"http.proxy http://alice:S3cr3tP@ss@proxy.corp:8080\n"
+        fake = subprocess.CompletedProcess([], 0, out, b"")
+        with mock.patch.object(pychecks.subprocess, "run", return_value=fake):
+            r = pychecks.belmond_banderas({})
+        blob = json.dumps(r, ensure_ascii=False)
+        self.assertEqual(r["status"], "info", "缺失关键项不算问题，有代理也只是信息")
+        self.assertEqual(r["category"], "toolchains")
+        self.assertNotIn("S3cr3tP@ss", blob)
+        self.assertIn("***", blob)
+
+    def test_git_config_skips_without_git(self):
+        with mock.patch.object(pychecks.subprocess, "run", side_effect=FileNotFoundError()):
+            self.assertEqual(pychecks.belmond_banderas({})["status"], "skip")
+
+    # ---- self.abi
+    def test_abi_verdict_matrix(self):
+        self.assertEqual(pychecks.yaguruma_rine("0.2.0", True, 1)[0], "ok")
+        self.assertEqual(pychecks.yaguruma_rine("unknown", True, 1)[0], "warn")
+        self.assertEqual(pychecks.yaguruma_rine("", True, 1)[0], "warn")
+        self.assertEqual(pychecks.yaguruma_rine("0.2.0", False, 1)[0], "warn")
+        self.assertEqual(pychecks.yaguruma_rine("0.2.0", True, 2)[0], "warn")
+        self.assertEqual(pychecks.yaguruma_rine("0.2.0", True, None)[0], "ok",
+                         "契约版本取不到时不硬报问题（核心可能只是接口更旧）")
+
+    def test_abi_check_skips_when_core_missing(self):
+        import envdoctor.binding as binding
+        with mock.patch.object(binding, "irys", side_effect=RuntimeError("no dll")):
+            r = pychecks.yumeoi_kakeru({})
+        self.assertEqual(r["status"], "skip", "DLL 缺失由 CLI 专门报错，这里不该再报 fail")
+        self.assertEqual(r["category"], "python")
+
+    def test_abi_check_ok_with_stub_core(self):
+        class _StubAbiCore:
+            has_list_checks = True
+
+            def takanashi_kiara(self):
+                return "1.2.3"
+
+            def gawr_gura(self, config=None, progress=None, cancel=None):
+                return {"report_version": 1}
+
+        import envdoctor.binding as binding
+        with mock.patch.object(binding, "irys", return_value=_StubAbiCore()):
+            r = pychecks.yumeoi_kakeru({})
+        self.assertEqual(r["status"], "ok")
+        self.assertIn("1.2.3", " ".join(r["detail"]))
+
+    # ---- 注册
+    def test_d3_checks_registered(self):
+        ids = {d["id"] for d in pychecks.tsukishita_kaoru()}
+        for cid in ("python.venv_integrity", "python.shadowing", "python.pth_files",
+                    "python.pip_check", "env.reboot_pending", "env.temp_path",
+                    "env.vcredist", "toolchains.java_home", "toolchains.git_config",
+                    "self.abi"):
+            self.assertIn(cid, ids)
+
+    def test_new_checks_do_not_leak_home_directory(self):
+        home = os.path.expanduser("~")
+        blob = json.dumps([fn({}) for fn in _D3_CHECK_FUNCS], ensure_ascii=False)
+        self.assertNotIn(home, blob)
+        self.assertNotIn(home.replace("\\", "/"), blob)
+
+
+class ReportContractTest(unittest.TestCase):
+    """展示层契约：产出的类别必须在 CATEGORIES 里，否则"跑了但看不见"。"""
+
+    def test_self_namespace_maps_to_declared_category(self):
+        # self.* 是自检命名空间而非报告类别：类别集合由展示层固定，自检项归属 python
+        self.assertEqual(pychecks.tsukino_mito("self.abi"), "python")
+        self.assertEqual(pychecks._doris("self.abi", "T", "ok")["category"], "python")
+
+    def test_all_python_check_categories_are_displayable(self):
+        cats = {d["category"] for d in pychecks.tsukishita_kaoru()}
+        self.assertTrue(cats <= set(cli.CATEGORIES), cats - set(cli.CATEGORIES))
+
+    def test_python_results_only_use_known_statuses(self):
+        rows = pychecks.yatogami_fuma({}, categories=["env", "hardware"])
+        known = set(cli._STATUS_ICON) | set(cli._STATUS_ASCII) | set(cli._COLOR)
+        for r in rows:
+            self.assertIn(r["status"], known, r["id"])
+
+
 if __name__ == "__main__":
     unittest.main()
