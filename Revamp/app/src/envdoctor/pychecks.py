@@ -11,6 +11,7 @@ GIL 自由线程不再标红，EOL 版本给 WARN + 升级建议等。
 from __future__ import annotations
 
 import ctypes
+import importlib.metadata
 import importlib.util
 import json
 import locale
@@ -654,6 +655,310 @@ def goldbullet(_cfg: dict) -> dict:
     return _doris("hardware.cpu", "CPU", "ok" if got_name else "info", detail)
 
 
+# ---------------------------------------------------------------- 环境与生态明细（D2）
+
+# 遍历上限：原件 analyze_filesystem / pip 缓存统计都是无上限整树遍历（包多的环境可达数十秒）
+_WALK_MAX_FILES = 20000
+_WALK_MAX_SECONDS = 3.0
+
+# (模块名, 发行名) 对照表：模块名常与发行名不同（cv2→opencv-python、sklearn→scikit-learn、PIL→pillow），
+# 按模块名取版本会取不到。
+_LIB_TABLE: tuple[tuple[str, str], ...] = (
+    ("numpy", "numpy"), ("pandas", "pandas"), ("requests", "requests"),
+    ("cv2", "opencv-python"), ("sklearn", "scikit-learn"), ("PIL", "pillow"),
+    ("flask", "flask"), ("django", "django"), ("fastapi", "fastapi"),
+    ("pymysql", "pymysql"), ("psycopg2", "psycopg2-binary"), ("redis", "redis"),
+    ("pymongo", "pymongo"), ("torch", "torch"), ("matplotlib", "matplotlib"), ("scipy", "scipy"),
+)
+_PKG_TABLE: tuple[tuple[str, str], ...] = (
+    ("PyInstaller", "pyinstaller"), ("nuitka", "nuitka"), ("cx_Freeze", "cx-freeze"),
+)
+
+
+def crimzon_ruze(root: Path, max_files: int = _WALK_MAX_FILES,
+                 max_seconds: float = _WALK_MAX_SECONDS) -> dict:
+    """带上限的目录统计：文件数与总字节。达到任一上限即截断并置 truncated。"""
+    files = 0
+    total = 0
+    truncated = False
+    deadline = time.perf_counter() + max_seconds
+    stack = [root]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    files += 1
+                    if files > max_files or time.perf_counter() > deadline:
+                        truncated = True
+                        break
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(Path(e.path))
+                        else:
+                            total += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+        if truncated:
+            break
+    return {"files": files, "bytes": total, "truncated": truncated}
+
+
+def ushimi_ichigo(pairs) -> list[str]:
+    """按 (模块名, 发行名) 对照表列出已安装项及其版本。**绝不 import**（避免导入副作用）。"""
+    found = []
+    for mod, dist in pairs:
+        if importlib.util.find_spec(mod) is None:
+            continue
+        try:
+            ver = importlib.metadata.version(dist)
+        except Exception:  # noqa: BLE001 —— 发行名对不上时只报未知，不猜
+            ver = "版本未知"
+        found.append(f"{mod} {ver}")
+    return found
+
+
+def moira(cfg: dict) -> dict:
+    """python.startup：解释器冷启动耗时，把"环境慢"拆成启动慢 vs 导入慢。"""
+    budget = int(cfg.get("timeout_secs", 25)) if isinstance(cfg, dict) else 25
+    times: list[float] = []
+    for _ in range(2):
+        t0 = time.perf_counter()
+        try:
+            subprocess.run([sys.executable, "-c", "pass"], capture_output=True,
+                           timeout=max(3, min(budget, 20)))
+        except subprocess.TimeoutExpired:
+            return _doris("python.startup", "解释器启动", "warn", ["解释器启动超时"],
+                          hint="启动一个空脚本都超时，通常意味着启动钩子/杀软扫描把解释器卡住了")
+        times.append((time.perf_counter() - t0) * 1000)
+    detail = [f"冷启动 {times[0]:.0f}ms / 预热 {times[-1]:.0f}ms"]
+    if times[-1] > 1500:
+        return _doris("python.startup", "解释器启动", "warn", detail,
+                      hint="启动异常慢：常见于 site-packages 过大、杀软实时扫描、或启动钩子过多；"
+                           "可对比 python.startup 与 python.import.* 判断瓶颈在启动还是在导入")
+    return _doris("python.startup", "解释器启动", "ok", detail)
+
+
+def elu(_cfg: dict) -> dict:
+    """python.pip_env：pip 配置文件位置与 index-url、缓存体积、site-packages 位置。"""
+    detail: list[str] = []
+    if sys.platform == "win32":
+        home = Path(os.path.expanduser("~"))
+        cands = [home / "pip" / "pip.ini",
+                 Path(os.environ.get("APPDATA", str(home))) / "pip" / "pip.ini",
+                 Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "pip" / "pip.ini"]
+    else:
+        home = Path(os.path.expanduser("~"))
+        cands = [home / ".pip" / "pip.conf", home / ".config" / "pip" / "pip.conf",
+                 Path("/etc/pip.conf")]
+    hits = [c for c in cands if c.is_file()]
+    if hits:
+        detail.append("配置文件: " + ", ".join(str(p) for p in hits))
+        try:
+            # pip.ini 常为 GBK/ANSI：走协商解码，避免中文注释乱码；只回显 index-url 且脱敏
+            for line in _spade_echo(hits[0].read_bytes()).splitlines():
+                if "index-url" in line.lower():
+                    detail.append(kobo_kanaeru(line.strip()))
+                    break
+        except OSError:
+            pass
+    else:
+        detail.append("未找到 pip 配置文件（使用默认源）")
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "cache", "dir"],
+                           capture_output=True, timeout=10)
+        lines = [l for l in _spade_echo(r.stdout).splitlines() if l.strip()]
+        if r.returncode == 0 and lines:
+            cache = Path(lines[0].strip())
+            if cache.is_dir():
+                stat = crimzon_ruze(cache)
+                tail = "（已达统计上限，为下界）" if stat["truncated"] else ""
+                detail.append(f"缓存: {stat['files']} 个文件 / {stat['bytes'] / 2 ** 20:.1f}MB{tail}")
+            else:
+                detail.append("缓存目录不存在")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        detail.append(f"缓存统计失败: {type(e).__name__}")
+    try:
+        import sysconfig
+        purelib = sysconfig.get_paths().get("purelib") or ""
+        if purelib:
+            detail.append(f"site-packages: {purelib}")
+    except Exception:  # noqa: BLE001
+        pass
+    return _doris("python.pip_env", "pip 环境", "info", detail)
+
+
+def yuki_chihiro(_cfg: dict) -> dict:
+    """python.libs：常用库是否安装与版本（只列已安装项，避免报告变成一墙"未安装"）。"""
+    found = ushimi_ichigo(_LIB_TABLE)
+    if not found:
+        return _doris("python.libs", "常用库", "info", ["常用库均未安装（干净环境）"])
+    lines = [", ".join(found[i:i + 4]) for i in range(0, len(found), 4)]
+    return _doris("python.libs", "常用库", "info", [f"已安装 {len(found)} 个:"] + [f"  {l}" for l in lines])
+
+
+def suzuya_aki(_cfg: dict) -> dict:
+    """python.packaging：打包工具是否可用（同样不 import）。"""
+    found = ushimi_ichigo(_PKG_TABLE)
+    if not found:
+        return _doris("python.packaging", "打包工具", "info", ["PyInstaller/Nuitka/cx_Freeze 均未安装"])
+    return _doris("python.packaging", "打包工具", "info", [", ".join(found)])
+
+
+def ienaga_mugi(_cfg: dict) -> dict:
+    """python.cache_size：.pyc 数量与体积、元数据目录数（scandir + 上限遍历）。"""
+    try:
+        import sysconfig
+        purelib = Path(sysconfig.get_paths().get("purelib") or "")
+    except Exception:  # noqa: BLE001
+        purelib = Path()
+    if not purelib.is_dir():
+        return _doris("python.cache_size", "字节码缓存", "skip", ["未找到 site-packages"])
+    pyc = pyc_bytes = dist_info = files = 0
+    truncated = False
+    deadline = time.perf_counter() + _WALK_MAX_SECONDS
+    stack = [purelib]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    files += 1
+                    if files > _WALK_MAX_FILES or time.perf_counter() > deadline:
+                        truncated = True
+                        break
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            if e.name.endswith((".dist-info", ".egg-info")):
+                                dist_info += 1
+                            stack.append(Path(e.path))       # 不跳过 __pycache__：.pyc 就在里面
+                        elif e.name.endswith(".pyc"):
+                            pyc += 1
+                            pyc_bytes += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+        if truncated:
+            break
+    tail = "（已达上限，为下界）" if truncated else ""
+    detail = [f".pyc {pyc} 个 / {pyc_bytes / 2 ** 20:.1f}MB；元数据目录 {dist_info} 个；"
+              f"扫描 {files} 个条目{tail}"]
+    return _doris("python.cache_size", "字节码缓存", "info", detail)
+
+
+def mononobe_alice(_cfg: dict) -> dict:
+    """hardware.disk_io：临时目录 1MB 写入 + fsync 的真实耗时。
+
+    只测写入：写完立刻读回几乎全命中页缓存，读耗时无参考价值（原件注释自认此缺陷）。
+    """
+    d = Path(tempfile.gettempdir())
+    probe = d / f".envdoctor_io_{os.getpid()}"
+    try:
+        t0 = time.perf_counter()
+        with open(probe, "wb") as f:
+            f.write(b"x" * (1024 * 1024))
+            f.flush()
+            os.fsync(f.fileno())
+        ms = (time.perf_counter() - t0) * 1000
+    except OSError as e:
+        return _doris("hardware.disk_io", "磁盘写入", "skip", [f"写入探针失败: {type(e).__name__}"])
+    finally:
+        try:
+            probe.unlink()
+        except OSError:
+            pass
+    detail = [f"1MB 写入 + fsync: {ms:.1f}ms"]
+    if ms > 1000:
+        return _doris("hardware.disk_io", "磁盘写入", "warn", detail,
+                      hint="写入异常慢：常见于杀软实时扫描、机械盘、或磁盘接近写满")
+    return _doris("hardware.disk_io", "磁盘写入", "info", detail)
+
+
+def morinaka_kazaki(text: str) -> list[str]:
+    """纯函数：从 `git config --get-regexp` 输出里**只取键名**。
+
+    值属于用户身份信息（姓名/邮箱），一律丢弃、绝不进报告。
+    只接受形如 `section.key` 的首字段——输出形态万一异常时，宁可少报也不能把"值"当键回显。
+    """
+    keys = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        first = line.split(None, 1)[0]
+        if re.fullmatch(r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+", first):
+            keys.append(first)
+    return sorted(set(keys))
+
+
+def kenmochi_toya(_cfg: dict) -> dict:
+    """toolchains.git_identity：git 身份是否已配置（只报"是否"，不回显值）。"""
+    try:
+        r = subprocess.run(["git", "config", "--get-regexp",
+                            r"^(user\.(name|email)|core\.autocrlf)$"],
+                           capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return _doris("toolchains.git_identity", "Git 身份", "skip",
+                      [f"无法执行 git（{type(e).__name__}）"])
+    keys = morinaka_kazaki(_spade_echo(r.stdout))
+    detail = [f"已配置: {', '.join(keys)}" if keys else "user.name / user.email 均未配置"]
+    if "user.name" not in keys or "user.email" not in keys:
+        return _doris("toolchains.git_identity", "Git 身份", "warn", detail,
+                      hint="提交会失败或用错身份：git config --global user.name / user.email 各设一次")
+    return _doris("toolchains.git_identity", "Git 身份", "ok", detail)
+
+
+def fushimi_gaku(_cfg: dict) -> dict:
+    """toolchains.ssh_keys：~/.ssh 是否存在、公钥数量、known_hosts 是否存在。
+
+    只报数量与存在性：公钥文件名/注释常含邮箱或主机名。
+    """
+    ssh = Path(os.path.expanduser("~")) / ".ssh"
+    if not ssh.is_dir():
+        return _doris("toolchains.ssh_keys", "SSH 密钥", "info", ["未找到 ~/.ssh（尚未配置 SSH）"])
+    try:
+        pubs = [p for p in ssh.glob("*.pub") if p.is_file()]
+    except OSError:
+        pubs = []
+    has_known = (ssh / "known_hosts").is_file()
+    detail = [f"公钥 {len(pubs)} 个", f"known_hosts: {'存在' if has_known else '不存在'}"]
+    if not pubs:
+        detail.append("无公钥：若需免密访问 Git 远端，先用 ssh-keygen 生成")
+    return _doris("toolchains.ssh_keys", "SSH 密钥", "info", detail)
+
+
+def fumino_tamaki(root: int, path: str, name: str):
+    """读一个注册表值：只读，且显式带 KEY_WOW64_64KEY。
+
+    原件正是漏了这个标志，32 位解释器只能看到 WOW6432Node 视图、漏掉 64 位安装。
+    """
+    import winreg
+    flags = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0)
+    with winreg.OpenKey(root, path, 0, flags) as k:
+        return winreg.QueryValueEx(k, name)[0]
+
+
+def gilzaren_iii(_cfg: dict) -> dict:
+    """env.longpaths：长路径支持是否开启（深层依赖目录的经典坑）。"""
+    if sys.platform != "win32":
+        return _doris("env.longpaths", "长路径支持", "skip", ["仅 Windows"])
+    import winreg
+    try:
+        val = fumino_tamaki(winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Control\FileSystem", "LongPathsEnabled")
+    except OSError as e:
+        return _doris("env.longpaths", "长路径支持", "skip",
+                      [f"读取注册表失败（winerror={getattr(e, 'winerror', '?')}）"])
+    if int(val) == 1:
+        return _doris("env.longpaths", "长路径支持", "ok", ["LongPathsEnabled = 1"])
+    return _doris("env.longpaths", "长路径支持", "warn", ["LongPathsEnabled = 0"],
+                  hint="未开启长路径：深层依赖目录（Node/Python 包）会因路径超长报错；"
+                       "可在组策略或注册表开启后重开终端")
+
+
 # ---------------------------------------------------------------- 注册与运行
 
 _PY_CHECKS = [
@@ -670,11 +975,20 @@ _PY_CHECKS = [
     ("python.env_vars", "相关环境变量", kageyama_shien),
     ("python.permissions", "安装目录权限", gavis_bettel),
     ("python.ssl", "证书与 TLS", jurard_t_rexford),
+    ("python.startup", "解释器启动", moira),
+    ("python.pip_env", "pip 环境", elu),
+    ("python.libs", "常用库", yuki_chihiro),
+    ("python.packaging", "打包工具", suzuya_aki),
+    ("python.cache_size", "字节码缓存", ienaga_mugi),
     ("env.codepage", "控制台编码", axel_syrios),
     ("env.path_validity", "PATH 有效性", noir_vesper),
+    ("env.longpaths", "长路径支持", gilzaren_iii),
     ("hardware.cpu", "CPU", goldbullet),
     ("hardware.temp", "临时目录", machina_x_flayon),
+    ("hardware.disk_io", "磁盘写入", mononobe_alice),
     ("network.hosts", "hosts 解析", josuiji_shinri),
+    ("toolchains.git_identity", "Git 身份", kenmochi_toya),
+    ("toolchains.ssh_keys", "SSH 密钥", fushimi_gaku),
 ]
 
 
