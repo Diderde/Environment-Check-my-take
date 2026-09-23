@@ -20,8 +20,8 @@ Revamp/
 │       ├── pychecks.py   #   Python 生态检查（必须在 Python 进程内执行的部分）
 │       ├── merge.py      #   Rust + Python 结果合并、诊断结论
 │       ├── cli.py        #   Typer CLI（默认折叠为分类摘要）
-│       ├── tui.py        #   Textual TUI（可展开收缩诊断树）
-│       └── gui.py        #   PySide6 三级可展开收缩树
+│       ├── tui.py        #   Textual TUI（摘要行 + 结果表 + 详情面板）
+│       └── gui.py        #   PySide6（摘要卡片 + 检查树 + 详情面板）
 ├── tests/                # Python 层单元测试（unittest）
 └── start.bat             # 一键环境检查 + 补齐 + 启动器（GBK 编码）
 ```
@@ -56,8 +56,8 @@ envdoctor run -c env -E          # 宿主环境类：代码页编码、PATH 有�
 envdoctor run --require git,node # 声明必备工具，缺失记 FAIL（逗号或重复传参均可）
 envdoctor run --json report.json --txt report.md
 envdoctor run --net-full         # 启用公网 IP 检查（默认关闭，见隐私）
-envdoctor tui                    # Textual 终端界面（R 运行 / C 取消 / E 展开 / Q 退出）
-envdoctor gui                    # PySide6 图形界面
+envdoctor tui                    # Textual 终端界面（R 运行 / C 取消 / E 全部 / X 只看问题 / S 存 JSON / Q 退出）
+envdoctor gui                    # PySide6 图形界面（摘要卡片可点按状态过滤，支持搜索与"只看问题"）
 ```
 
 退出码：存在 FAIL 级问题、或引擎异常（`report.error` 非空）时为 1；核心 DLL 缺失为 2。
