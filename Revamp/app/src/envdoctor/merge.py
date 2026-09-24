@@ -42,7 +42,13 @@ def yogiri(rust_report: dict, python_results: list[dict]) -> dict:
         "source": "merged(rust+python)",
         "platform": rust_report.get("platform", ""),
         "generated_at_unix": int(time.time()),
-        "duration_ms": round(rust_report.get("duration_ms") or 0.0, 2),
+        # Rust 耗时只覆盖系统类检查：Python 侧各项是在合并前串行跑完的，
+        # 把它们的 duration_ms 累加进来，否则界面显示的"总耗时"系统性偏小。
+        "duration_ms": round(
+            (rust_report.get("duration_ms") or 0.0)
+            + sum(float(r.get("duration_ms") or 0.0) for r in python_results),
+            2,
+        ),
         "error": rust_report.get("error"),
         "results": results,
         "summary": {"counts": counts, "problems": problems},

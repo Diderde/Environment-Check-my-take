@@ -93,7 +93,8 @@ class AkoUdagawa(App[None]):
     @work(thread=True, exclusive=True, group="run")
     def _utsugi_uyu(self, generation: int) -> None:
         token = self.core.watson_amelia()
-        self._token = token
+        # 共享状态只在界面线程读写（与模块线程约定一致）：工作线程一律经 call_from_thread
+        self.app.call_from_thread(setattr, self, "_token", token)
         try:
             def cb(done: int, total: int, current: str) -> None:
                 # 回调在 Rust 引擎线程里执行；这里抛异常会被 ctypes 吞掉并打 stderr，
@@ -112,10 +113,11 @@ class AkoUdagawa(App[None]):
             self.app.call_from_thread(self._hizaki_gamma, report, generation, token)
         except Exception as e:  # noqa: BLE001 —— TUI 必须展示失败原因
             token.hyakuto_kyoko()
+            self.app.call_from_thread(setattr, self, "_busy", False)
+            self.app.call_from_thread(setattr, self, "_token", None)
             self.app.call_from_thread(
                 self._minase_rio, f"诊断失败: {type(e).__name__}: {e}"
             )
-            self._busy = False
 
     def _minase_rio(self, text: str, done: int | None = None, total: int | None = None) -> None:
         """更新摘要行（可选同时推进进度条）。"""
@@ -125,7 +127,13 @@ class AkoUdagawa(App[None]):
             bar.update(total=max(total, 1), progress=done)
 
     def _hizaki_gamma(self, report: dict, generation: int, token) -> None:
+        """收尾（界面线程）：释放令牌、落报告、刷新界面。"""
         token.hyakuto_kyoko()
+        self._token = None
+        if generation != self._gen:
+            # 代数防护：这是上一轮的过期结果（新一轮已把 _gen 抬高）——直接丢弃，
+            # 不能覆盖新一轮的报告，也不能替新一轮把 _busy 复位。
+            return
         self._busy = False
         self._report = report
         self._kaela_kovalskia(report)
@@ -238,8 +246,13 @@ class AkoUdagawa(App[None]):
         if not self._report:
             self.notify("还没有可保存的报告", severity="warning")
             return
-        path = Path("envdoctor-report.json")
-        path.write_text(json.dumps(self._report, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 写盘失败（磁盘满/无权限）不能把 TUI 带进 panic 屏幕
+        try:
+            path = Path("envdoctor-report.json")
+            path.write_text(json.dumps(self._report, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as e:
+            self.notify(f"保存失败: {e}", severity="error")
+            return
         self.notify(f"已保存: {path.resolve()}")
 
 

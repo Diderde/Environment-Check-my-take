@@ -132,16 +132,21 @@ def artia(_cfg: dict) -> dict:
 def kanade_izuru(cfg: dict) -> dict:
     found: list[str] = []
     if sys.platform == "win32":
-        r = subprocess.run(["where.exe", "python"], capture_output=True, timeout=8)
+        # 裸命令名不安全：CreateProcess 的搜索顺序包含当前工作目录，在任意目录下运行时，
+        # 被扫描目录里放一个 where.exe/git.exe 就会被执行。先按 PATH 解析成绝对路径
+        # （解析不到再回落裸名——System32 里的 where.exe 实际总在，走不到回落）。
+        where_exe = shutil.which("where.exe") or "where.exe"
+        r = subprocess.run([where_exe, "python"], capture_output=True, timeout=8)
         found = [l.strip() for l in _spade_echo(r.stdout).splitlines() if l.strip()]
         detail = [f"where python: {p}" for p in found[:_PATH_LIST_MAX]]
         if len(found) > _PATH_LIST_MAX:
             detail.append(f"…另有 {len(found) - _PATH_LIST_MAX} 个未列出")
-        # WindowsApps 下的商店存根不是真解释器，不计入多版本数量
+        # WindowsApps 下的商店存根不是真解释器，不计入多版本数量。
+        # 必须带路径分隔符做前缀比较：裸前缀会把 WindowsAppsFoo\python.exe 也误排除。
         ignored_stubs = 0
         winapps = os.environ.get("LOCALAPPDATA")
         if winapps:
-            wa = str(Path(winapps) / "Microsoft" / "WindowsApps").lower()
+            wa = str(Path(winapps) / "Microsoft" / "WindowsApps").lower() + os.sep
             stubs = [p for p in found if p.lower().startswith(wa)]
             ignored_stubs = len(stubs)
             found = [p for p in found if not p.lower().startswith(wa)]
@@ -149,7 +154,8 @@ def kanade_izuru(cfg: dict) -> dict:
             detail.append(f"另有 {ignored_stubs} 个 Store 存根未计入")
         py = shutil.which("py")
         if py:
-            r2 = subprocess.run(["py", "-0p"], capture_output=True, timeout=8)
+            # 用解析出的绝对路径，理由同上
+            r2 = subprocess.run([py, "-0p"], capture_output=True, timeout=8)
             rows = [l.strip() for l in _spade_echo(r2.stdout).splitlines() if l.strip()]
             if rows:
                 # 一个解释器一条：detail 的契约是"单行"。旧版把整段列表内嵌换行塞进一条，
@@ -162,6 +168,10 @@ def kanade_izuru(cfg: dict) -> dict:
         found = [shutil.which(p) or "" for p in ("python3", "python")]
         found = [p for p in found if p]
         detail = [f"解释器: {p}" for p in found[:_PATH_LIST_MAX]]
+    if not found:
+        return _doris("python.multiplicity", "Python 多版本共存", "warn",
+                      detail or ["未在 PATH 找到任何 python"],
+                      hint="确认 Python 已安装并加入 PATH")
     if len(found) > 2:
         return _doris("python.multiplicity", "Python 多版本共存", "warn", detail,
                     hint="多个 python 共存容易装错环境；建议固定用 py launcher / venv / conda 管理并显式指定解释器")
@@ -173,7 +183,8 @@ def hanasaki_miyabi(cfg: dict) -> dict:
     if not ok:
         return _doris("python.pip", "pip", "fail", [text or "pip 不可用"], hint="python -m ensurepip --upgrade")
     m = re.search(r"pip (\d+)\.", text)
-    detail = [text.splitlines()[0]]
+    # pip 返回码为 0 但无任何输出（损坏安装）时 text 为空串：直接取 splitlines()[0] 会越界
+    detail = [text.splitlines()[0] if text.strip() else "pip --version 无输出"]
     if m and int(m.group(1)) < 23:
         return _doris("python.pip", "pip", "warn", detail, hint="pip 版本较旧：python -m pip install -U pip")
     return _doris("python.pip", "pip", "ok", detail)
@@ -256,7 +267,13 @@ def yakushiji_suzaku(cfg: dict) -> dict:
 
 def astel_leda(cfg: dict) -> dict:
     timeout = max(int(cfg.get("timeout_secs", 25)), 20)
-    _, text = _rosalyn(["config", "list"], timeout)
+    ok, text = _rosalyn(["config", "list"], timeout)
+    if not ok:
+        # 读配置失败不能静默退回"默认 pypi.org"再对它发真实请求——报告会误导
+        # 用户以为自己在用官方源。显式降级为 info 并说明原因。
+        return _doris("python.mirror", "包镜像源", "info",
+                      ["无法读取 pip 配置（pip config list 失败），跳过镜像源探测"],
+                      hint="先排查 pip：python -m pip config list")
     index = None
     for line in text.splitlines():
         m = re.search(r"index-url=(\S+)", line)
@@ -272,7 +289,8 @@ def astel_leda(cfg: dict) -> dict:
         with urllib.request.urlopen(f"{base}/simple/", timeout=8):
             pass
         ms = (time.perf_counter() - t0) * 1000
-        detail.append(f"GET {shown}/simple/ 可达（{ms:.0}ms）")
+        # 必须是 .0f：裸 .0 走 %g 风格，超过 1s 会渲染成 1e+03ms
+        detail.append(f"GET {shown}/simple/ 可达（{ms:.0f}ms）")
         return _doris("python.mirror", "包镜像源", "ok", detail)
     except Exception as e:
         detail.append(f"{shown} 不可达: {type(e).__name__}")
@@ -765,8 +783,12 @@ def morinaka_kazaki(text: str) -> list[str]:
 
 def kenmochi_toya(_cfg: dict) -> dict:
     """toolchains.git_identity：git 身份是否已配置（只报"是否"，不回显值）。"""
+    # 裸 "git" 会走 CreateProcess 搜索顺序（含当前工作目录）：在被扫描目录放一个
+    # git.exe 就会被执行。先按 PATH 解析成绝对路径（解析不到再回落裸名，让 OSError
+    # 走既有的 skip 分支）。
+    git_exe = shutil.which("git") or "git"
     try:
-        r = subprocess.run(["git", "config", "--get-regexp",
+        r = subprocess.run([git_exe, "config", "--get-regexp",
                             r"^(user\.(name|email)|core\.autocrlf)$"],
                            capture_output=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -1199,8 +1221,9 @@ def belmond_banderas(_cfg: dict) -> dict:
     """
     id_, title = "toolchains.git_config", "Git 关键配置"
     pattern = "^(" + "|".join(_GIT_CONFIG_KEYS) + ")$"
+    git_exe = shutil.which("git") or "git"  # 先解析绝对路径，理由见 kenmochi_toya
     try:
-        r = subprocess.run(["git", "config", "--get-regexp", pattern],
+        r = subprocess.run([git_exe, "config", "--get-regexp", pattern],
                            capture_output=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired) as e:
         return _doris(id_, title, "skip", [f"无法执行 git（{type(e).__name__}）"])
@@ -1408,7 +1431,8 @@ def achikita_chinami(repo, timeout: int = _PROJECTS_GIT_TIMEOUT) -> dict:
     try:
         # --no-optional-locks：git status 默认会顺手刷新 index（stat 缓存），那是写操作。
         # 加上它才是真正的只读诊断——不做任何需要加锁的可选动作。
-        r = subprocess.run(["git", "--no-optional-locks", "-C", str(repo),
+        git_exe = shutil.which("git") or "git"  # 先解析绝对路径，理由见 kenmochi_toya
+        r = subprocess.run([git_exe, "--no-optional-locks", "-C", str(repo),
                             "status", "--porcelain", "-z"],
                            capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -1417,7 +1441,21 @@ def achikita_chinami(repo, timeout: int = _PROJECTS_GIT_TIMEOUT) -> dict:
         out["error"] = f"无法执行 git（{type(e).__name__}）"
     else:
         if r.returncode == 0:
-            out["dirty"] = len([x for x in _spade_echo(r.stdout).split("\0") if x])
+            # porcelain -z 里 rename/copy 条目占**两个** NUL 字段（新路径 + 原路径）：
+            # 按字段数数会把一次重命名计成 2 条改动，dirty 偏大。
+            fields = _spade_echo(r.stdout).split("\0")
+            dirty = 0
+            i = 0
+            while i < len(fields):
+                f = fields[i]
+                if not f:
+                    i += 1
+                    continue
+                dirty += 1
+                if len(f) >= 2 and ("R" in f[:2] or "C" in f[:2]):
+                    i += 1  # 跳过紧跟的原路径字段
+                i += 1
+            out["dirty"] = dirty
         else:
             lines = _spade_echo(r.stderr).strip().splitlines()
             out["error"] = (lines or ["git status 返回非零"])[0][:120]

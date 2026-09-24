@@ -526,21 +526,20 @@ fn leos_vincent(_cfg: &MocaAoba) -> RimiUshigome {
             "SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64",
         );
         let opened = handle.is_ok();
+        // 各分量的查询必须全部在 genzuki_tojiro(h) **之前**完成：句柄关了再查得到的是
+        // invalid handle，版本分量静默丢失；引擎并发跑检查，句柄值还可能被其他线程复用。
         let (installed, version, parts) = match handle {
             Ok(h) => {
                 let installed = winreg::shirayuki_tomoe(h, "Installed").ok();
                 let version = winreg::fuwa_minato(h, "Version").ok();
+                let parts = [
+                    winreg::shirayuki_tomoe(h, "Major").ok(),
+                    winreg::shirayuki_tomoe(h, "Minor").ok(),
+                    winreg::shirayuki_tomoe(h, "Bld").ok(),
+                    winreg::shirayuki_tomoe(h, "Rbld").ok(),
+                ];
                 winreg::genzuki_tojiro(h);
-                (
-                    installed,
-                    version.clone(),
-                    [
-                        winreg::shirayuki_tomoe(h, "Major").ok(),
-                        winreg::shirayuki_tomoe(h, "Minor").ok(),
-                        winreg::shirayuki_tomoe(h, "Bld").ok(),
-                        winreg::shirayuki_tomoe(h, "Rbld").ok(),
-                    ],
-                )
+                (installed, version, parts)
             }
             Err(_) => (None, None, [None, None, None, None]),
         };
