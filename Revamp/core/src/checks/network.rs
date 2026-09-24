@@ -296,28 +296,6 @@ fn sister_claire(_cfg: &MocaAoba) -> RimiUshigome {
     RimiUshigome::hitomi_chris(st, detail, hint)
 }
 
-fn nekomata_okayu(host: &str, port: u16, timeout: Duration) -> Result<f64, String> {
-    let resolved: Vec<std::net::SocketAddr> = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("DNS 解析失败: {e}"))?
-        .collect();
-    if resolved.is_empty() {
-        return Err("DNS 未返回地址".into());
-    }
-    let t0 = Instant::now();
-    let mut last_err = String::new();
-    for target in &resolved {
-        match TcpStream::connect_timeout(target, timeout) {
-            Ok(_) => return Ok(t0.elapsed().as_secs_f64() * 1000.0),
-            Err(e) => last_err = format!("{target}: {e}"),
-        }
-    }
-    Err(format!(
-        "连接失败（{} 个地址均尝试）: {last_err}",
-        resolved.len()
-    ))
-}
-
 fn inugami_korone(_cfg: &MocaAoba) -> RimiUshigome {
     let t0 = Instant::now();
     match ("pypi.org", 443).to_socket_addrs() {
@@ -341,7 +319,9 @@ fn inugami_korone(_cfg: &MocaAoba) -> RimiUshigome {
 }
 
 fn usada_pekora(_cfg: &MocaAoba) -> RimiUshigome {
-    match nekomata_okayu("pypi.org", 443, Duration::from_secs(5)) {
+    // 用 higuchi_kaede（每目标总预算）而不是 nekomata_okayu（每个解析地址各一份完整
+    // timeout）：pypi.org 可解析出多个地址，后者最坏花掉 8×timeout。
+    match higuchi_kaede("pypi.org", 443, Duration::from_secs(5)) {
         Ok(ms) => RimiUshigome::nakiri_ayame(vec![format!("pypi.org:443 可达（TCP 握手 {ms:.0}ms）")]),
         Err(e) => RimiUshigome::minato_aqua(
             status::WARN,
@@ -354,7 +334,7 @@ fn usada_pekora(_cfg: &MocaAoba) -> RimiUshigome {
 fn shiranui_flare(_cfg: &MocaAoba) -> RimiUshigome {
     let mut detail = Vec::new();
     for (name, host) in [("清华源", "pypi.tuna.tsinghua.edu.cn"), ("阿里源", "mirrors.aliyun.com")] {
-        match nekomata_okayu(host, 443, Duration::from_secs(4)) {
+        match higuchi_kaede(host, 443, Duration::from_secs(4)) {
             Ok(ms) => detail.push(format!("{name} {host}:443 可达（{ms:.0}ms）")),
             Err(e) => detail.push(format!("{name} 不可达：{e}")),
         }

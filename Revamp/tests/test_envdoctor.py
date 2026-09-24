@@ -80,14 +80,15 @@ def _run_cli(argv: list[str], core: _StubCore) -> tuple[int, str]:
 
     Python 侧检查整体替身掉：这里测的是 CLI 行为，不该真去跑 pip list --outdated。
     """
-    cli._elizabeth_rose_bloodflame = lambda _p: core
     buf = io.StringIO()
     old_out, old_err = sys.stdout, sys.stderr
     sys.stdout = buf
     sys.stderr = buf
     code = 0
     try:
-        with mock.patch.object(pychecks, "yatogami_fuma", return_value=[]):
+        # 都走 mock.patch.object：退出后恢复原函数。裸赋值会把替身泄漏给同进程后续测试。
+        with mock.patch.object(pychecks, "yatogami_fuma", return_value=[]), \
+                mock.patch.object(cli, "_elizabeth_rose_bloodflame", return_value=core):
             cli.app(argv)
     except SystemExit as e:
         code = int(e.code or 0)
@@ -141,9 +142,13 @@ class PyChecksTest(unittest.TestCase):
         self.assertEqual(r["status"], "info")
 
     def test_venv_inside_project_venv(self):
-        # 本测试运行在 .venv 中，应当识别为虚拟环境
-        r = pychecks.rikka({})
-        self.assertIn(r["status"], ("ok", "skip"))
+        # 不依赖宿主解释器状态（是否在 venv 里取决于怎么跑测试）：显式构造
+        # "prefix != base_prefix" 的前提，rikka 应识别为虚拟环境并给 ok。
+        with mock.patch.object(pychecks.sys, "prefix", "Z:\\envdoctor-venv"), \
+                mock.patch.object(pychecks.sys, "base_prefix", "Z:\\Python312"):
+            r = pychecks.rikka({})
+        self.assertEqual(r["status"], "ok")
+        self.assertIn("虚拟环境", " ".join(r["detail"]))
 
     def test_py_check_defs_unique(self):
         defs = pychecks.tsukishita_kaoru()
@@ -444,6 +449,7 @@ class CategoryDerivationTest(unittest.TestCase):
 
 
 
+@skipUnless(sys.platform == "win32", "代码页探测依赖 ctypes.windll，仅 Windows")
 class CodepageTest(unittest.TestCase):
     class _K32:
         def __init__(self, cp):
@@ -550,12 +556,13 @@ class SslCheckTest(unittest.TestCase):
         self.assertIn("中间人代理", r["hint"])
 
 
+@skipUnless(sys.platform == "win32", "注册表与 windll 探测仅 Windows")
 class CpuCheckTest(unittest.TestCase):
     def test_registry_failure_degrades_to_info(self):
         with mock.patch("winreg.OpenKey", side_effect=OSError("denied")), \
                 mock.patch.object(pychecks, "octavio", return_value=0):
             r = pychecks.goldbullet({})
-        self.assertIn(r["status"], ("info", "ok"))
+        self.assertEqual(r["status"], "info")
         self.assertEqual(r["category"], "hardware")
 
     def test_octavio_never_raises(self):
@@ -700,6 +707,7 @@ class D2ChecksTest(unittest.TestCase):
 
 
     # ---- pip 环境
+    @skipUnless(sys.platform == "win32", "elu 的配置文件定位依赖 USERPROFILE/APPDATA（Windows）")
     def test_pip_env_reports_and_masks_index_url(self):
         tmp = Path(tempfile.mkdtemp())
         try:
@@ -930,6 +938,7 @@ class D3ChecksTest(unittest.TestCase):
         self.assertEqual(len(pychecks.takamiya_rion(over_long, "", True, True)[1]), 3,
                          "TEMP/TMP 两行 + 判定行")
 
+    @skipUnless(sys.platform == "win32", "asuka_hina 仅 Windows 实现")
     def test_temp_path_check_reads_env_and_cleans_up(self):
         tmp = tempfile.mkdtemp()
         try:
@@ -941,11 +950,13 @@ class D3ChecksTest(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    @skipUnless(sys.platform == "win32", "asuka_hina 仅 Windows 实现")
     def test_temp_path_check_fails_when_dir_missing(self):
         with mock.patch.dict(os.environ, {"TEMP": r"Z:\envdoctor-no-such-dir", "TMP": ""}):
             r = pychecks.asuka_hina({})
         self.assertEqual(r["status"], "fail")
-        self.assertIn("临时目录", r["hint"] + "临时目录")
+        # 断言真实 hint 内容（缺失目录分支的 hint 以"TEMP/TMP 指向的目录不存在"开头）
+        self.assertIn("目录不存在", r["hint"])
 
 
 

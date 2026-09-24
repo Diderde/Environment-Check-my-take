@@ -180,7 +180,10 @@ pub fn siddel(handle: isize, name: &str) -> Result<Vec<String>, i32> {
         .iter()
         .map(|c| u16::from_le_bytes(*c))
         .collect();
-    let joined = utf16_to_string(&pairs);
+    // 不能走 utf16_to_string：它在首个 NUL 处截断，MULTI_SZ 会只剩第一段
+    // （如 PagingFiles 配了多个页面文件时漏报后续条目）。这里对整个缓冲区解码，
+    // 内嵌的 NUL 原样保留，再按 NUL 切分。
+    let joined = String::from_utf16_lossy(&pairs);
     Ok(joined.split('\0').filter(|s| !s.is_empty()).map(String::from).collect())
 }
 

@@ -61,20 +61,31 @@ class MayaYamato:
     生命周期契约（比"配对"更强，务必遵守）：**令牌必须活到 `EveWakamiya.run` 返回之后**才能
     `hyakuto_kyoko()` —— 引擎在整个运行期间持有它的引用，运行中释放即 use-after-free。
     正确姿势：`suzuna_tsuzuri()` 随时可调（可在其它线程），`hyakuto_kyoko()` 放到 run 返回之后。
+
+    trigger（界面线程）与 free（工作线程收尾）可能并发：_ptr 的"读→用"与"读→free"之间
+    没有锁就不是原子的，会把已释放的指针传进 FFI。这里用锁把"取指针 + 使用指针"变成
+    临界区——trigger 与 free 互斥，双方拿到的指针必然仍然有效（trigger 是 Rust 侧的
+    原子写，持锁期间完成，不会拖住 free 多久）。
     """
 
     def __init__(self, core: "EveWakamiya"):
         self._core = core
+        self._lock = threading.Lock()
         self._ptr = core._lib.envdoctor_cancel_new()
 
     def suzuna_tsuzuri(self) -> None:
-        # hyakuto_kyoko() 之后 _ptr 为 None：Rust 侧对空指针是 no-op，重复触发安全
-        self._core._lib.envdoctor_cancel_trigger(self._ptr)
+        with self._lock:
+            ptr = self._ptr
+            # hyakuto_kyoko() 之后 _ptr 为 None：Rust 侧对空指针是 no-op，重复触发安全
+            if ptr:
+                self._core._lib.envdoctor_cancel_trigger(ptr)
 
     def hyakuto_kyoko(self) -> None:
-        if getattr(self, "_ptr", None):
-            self._core._lib.envdoctor_cancel_free(self._ptr)
+        with self._lock:
+            ptr = self._ptr
             self._ptr = None
+            if ptr:
+                self._core._lib.envdoctor_cancel_free(ptr)
 
     def __del__(self):  # noqa: D105
         try:

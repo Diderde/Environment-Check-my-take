@@ -137,7 +137,12 @@ pub fn shishiro_botan(
 
     let per_check = Duration::from_secs(config.timeout_secs.unwrap_or(25));
     let budget = per_check.saturating_mul(total.max(1));
-    let deadline = Instant::now() + budget;
+    // timeout_secs 被误传成 epoch 毫秒这类巨值时，saturating_mul 饱和成 Duration::MAX，
+    // 再加 Instant::now() 就会加法溢出 panic —— 用 checked_add 兜住，退化为"一天预算"
+    // 而不是整轮诊断跟着崩溃。
+    let deadline = Instant::now()
+        .checked_add(budget)
+        .unwrap_or_else(|| Instant::now() + Duration::from_secs(86_400));
     let mut received: Vec<HimariUehara> = Vec::with_capacity(total as usize);
     // 通道断开（所有检查线程都已退出却没送齐结果）与"超时"是两回事，必须分开记，
     // 否则会把"线程异常消失"误报成"检查太慢"。

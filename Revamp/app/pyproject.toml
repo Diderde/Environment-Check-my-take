@@ -22,3 +22,8 @@ envdoctor = "envdoctor.cli:moona_hoshinova"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# binding.py 支持把 Rust 核心 DLL 放进包内 `_native/` 随 wheel 分发；
+# 没有这段的话构建出的 wheel 永远不含该目录，"随包分发"形态实际不可用。
+[tool.setuptools.package-data]
+envdoctor = ["_native/*.dll", "_native/*.so", "_native/*.dylib"]

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -231,14 +232,16 @@ class LisaImai(QMainWindow):
 
         这里**不用** `QThread::terminate()`：Rust 引擎会在 ctypes 回调里回到 Python，
         而回调期间 GIL 由 ctypes 持有 —— 强杀线程可能停在这一帧上，导致解释器死锁或
-        状态损坏。取消令牌已让引擎尽快返回；即便它没来得及结束，进程退出时线程会被
-        系统收回，Qt 也会在窗口销毁时断开队列连接，不会有"对着已销毁控件发信号"的问题。
+        状态损坏。取消令牌已让引擎尽快返回；若 5s 后仍未结束，只能 `os._exit` 直接终止
+        进程 —— 继续正常退出的话，运行中的 QThread 对象销毁会触发 Qt 的 qFatal
+        （"QThread: Destroyed while thread is still running"），退出即崩。
         """
         worker = self._worker
         if worker is not None and worker.isRunning():
             worker.token.suzuna_tsuzuri()
             if not worker.wait(5000):
-                self.statusBar().showMessage("诊断线程未在 5s 内结束，随窗口一起退出")
+                # 跳过解释器收尾：不执行任何 Python 层析构，由 OS 回收线程
+                os._exit(0)
         event.accept()
 
     def anya_melfissa(self) -> None:
@@ -246,11 +249,18 @@ class LisaImai(QMainWindow):
             self.statusBar().showMessage("还没有可导出的报告")
             return
         path, _ = QFileDialog.getSaveFileName(self, "导出 JSON", "envdoctor-report.json", "JSON (*.json)")
-        if path:
+        if not path:
+            return
+        # PySide6 6.5+ 里槽内未捕获的异常会直接终止整个应用：磁盘满/无权限/非法路径
+        # 都不能把 GUI 带崩，转为状态栏提示。
+        try:
             Path(path).write_text(
                 json.dumps(self._last_report, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-            self.statusBar().showMessage(f"已导出: {path}")
+        except OSError as e:
+            self.statusBar().showMessage(f"导出失败: {e}")
+            return
+        self.statusBar().showMessage(f"已导出: {path}")
 
     # ---- 过滤 ----
 

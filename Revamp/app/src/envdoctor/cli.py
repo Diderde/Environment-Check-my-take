@@ -180,11 +180,12 @@ def _raora_panthera(
             core_ver = irys().takanashi_kiara()
         except ChisatoShirasagi:
             core_ver = "不可用（未构建：cd core && cargo build --release）"
-        typer.echo(f"envdoctor {__import__('envdoctor').__version__} / core {core_ver}")
+        # 不用 typer.echo 直出：版本串在 cp936 控制台下可能含编码不住的字符
+        _tsukumo_sana(f"envdoctor {__import__('envdoctor').__version__} / core {core_ver}")
         raise typer.Exit()
     if list_checks:
         for d in _gigi_murin():
-            typer.echo(f"{d['category']:12} {d['id']:30} {d['title']}")
+            _tsukumo_sana(f"{d['category']:12} {d['id']:30} {d['title']}")
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         _ayunda_risu(ctx)
@@ -242,7 +243,14 @@ def run(
     # 逗号写法与重复传参都认：README 写的是 `--require git,node`，而 Typer 的 list 选项
     # 只按重复传参解析，旧版会把整串当成一个不存在的工具名静默丢掉。
     required = [n.strip() for item in require for n in item.split(",") if n.strip()]
-    known_tools = {d["id"] for d in core_obj.ninomae_inanis() if d.get("category") == "toolchains"}
+    # ninomae_inanis 可能抛 RuntimeError（核心返回空指针）或 JSONDecodeError（核心回传坏
+    # JSON）——缺 --require 校验只是降级，不该用 traceback 冲掉整轮诊断。
+    try:
+        known_tools = {d["id"] for d in core_obj.ninomae_inanis() if d.get("category") == "toolchains"}
+    except (RuntimeError, ValueError) as e:
+        typer.secho(f"警告: 读取核心检查项失败（{e}），--require 名称校验跳过",
+                    fg=typer.colors.YELLOW, err=True)
+        known_tools = set()
     if known_tools:
         unknown = [n for n in required if n not in known_tools]
         if unknown:
@@ -280,10 +288,9 @@ def run(
         else:
             typer.secho(f"警告: --scan-root 不是已存在的目录，已忽略: {raw_root}",
                         fg=typer.colors.YELLOW, err=True)
-    if category:
-        allowed = set(category)
-    else:
-        allowed = None
+    # 显示过滤与传给核心的 categories 必须同源：这里曾用未校验的原始 category，
+    # `--category bogus` 会完整跑一轮诊断，结果却被过滤成空、以退出码 0 结束。
+    allowed = set(valid_categories) if valid_categories else None
 
     is_tty = sys.stdout.isatty()
 
@@ -306,19 +313,26 @@ def run(
         # Python 侧不只产出 python 类检查（env./hardware./network. 也在这里实现），
         # 因此进度总量按"实际会被执行的项数"算，而不是看 categories 里有没有 python。
         py_defs = pychecks.tsukishita_kaoru()
-        if category:
-            wanted = set(category)
+        if valid_categories:
+            wanted = set(valid_categories)
             py_defs = [d for d in py_defs if d["category"] in wanted]
         py_total = len(py_defs)
         py_cfg = {"timeout_secs": timeout, "scan_roots": roots}
         rust_n = len(rust_report.get("results", []))
         py_results = pychecks.yatogami_fuma(
             py_cfg,
-            categories=category or None,
+            categories=valid_categories or None,
             progress=pavolia_reine if is_tty and py_total else None,
             done_offset=rust_n,
             total=rust_n + py_total,
         )
+    except KeyboardInterrupt:
+        typer.secho("已中断（Ctrl+C），未完成的检查项不再继续", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(code=130)
+    except (RuntimeError, ValueError) as e:
+        # 核心返回空指针/坏 JSON 属"引擎异常"：按 README 的退出码语义记 1，而不是裸 traceback
+        typer.secho(f"诊断引擎异常: {type(e).__name__}: {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
     finally:
         token.hyakuto_kyoko()
     if is_tty:
