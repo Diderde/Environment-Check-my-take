@@ -52,6 +52,56 @@ pub fn amane_kanata() -> &'static str {
 
 pub type Progress<'a> = &'a (dyn Fn(u32, u32, &str) + Sync);
 
+/// ASCII 大小写不敏感的子串查找（路径是 ASCII 为主，逐字节折叠 A-Z 即够）。
+fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    let hb = haystack.as_bytes();
+    let nb = needle.as_bytes();
+    (0..=hb.len() - nb.len()).find(|&i| hb[i..i + nb.len()].eq_ignore_ascii_case(nb))
+}
+
+/// 把文本里的主目录前缀替换为 %USERPROFILE%（与 Python 侧 regis_altare 同规则）。
+///
+/// Rust 侧回显路径的检查（path_validity / path_shadowing / temp 等）明细里会出现
+/// `C:\Users\<用户名>\...`；报告会被导出或粘贴，用户名不能落进报告。与 Python 侧
+/// 一样按**大小写不敏感**匹配（PATH 里 `c:\users` 与 `C:\Users` 两种形态都实测存在），
+/// 且 `\` 与 `/` 两种分隔符形态都处理。匹配命中处必然在字符边界上（合法 UTF-8 的
+/// 续字节不可能与 needle 首字节相等），按字节下标切片安全。
+fn gaon(text: &str, homes: &[String]) -> String {
+    let mut out = text.to_string();
+    for home in homes {
+        let mut s = String::with_capacity(out.len());
+        let mut rest = out.as_str();
+        while let Some(pos) = find_ignore_ascii_case(rest, home) {
+            s.push_str(&rest[..pos]);
+            s.push_str("%USERPROFILE%");
+            rest = &rest[pos + home.len()..];
+        }
+        s.push_str(rest);
+        out = s;
+    }
+    out
+}
+
+/// 主目录的候选形态：原样 + 正斜杠变体（覆盖 `C:/Users/x` 写法）。
+fn home_variants() -> Vec<String> {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
+    // 空 与 "/"（病态环境）不做替换，否则会把所有路径分隔符一起吞掉
+    if home.is_empty() || home == "/" {
+        return Vec::new();
+    }
+    let mut v = vec![home.clone()];
+    let fwd = home.replace('\\', "/");
+    if fwd != home {
+        v.push(fwd);
+    }
+    v
+}
+
 /// 从 panic payload 里取出可读信息（`panic!("…")` 与 `panic!("{}", x)` 两种形态都覆盖）。
 pub fn yukihana_lamy(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
@@ -192,6 +242,20 @@ pub fn shishiro_botan(
             results.push(o);
         }
     }
+    // 统一出口脱敏：detail/hint/error 里的主目录前缀一律替换为 %USERPROFILE%
+    //（Python 侧检查经 _doris 已各自脱敏；Rust 侧在这里一次兜住，新增检查自动继承）。
+    let homes = home_variants();
+    if !homes.is_empty() {
+        for o in &mut results {
+            o.detail = o.detail.iter().map(|d| gaon(d, &homes)).collect();
+            if let Some(h) = &o.hint {
+                o.hint = Some(gaon(h, &homes));
+            }
+            if let Some(e) = &o.error {
+                o.error = Some(gaon(e, &homes));
+            }
+        }
+    }
     results.sort_by(|a, b| a.category.cmp(&b.category).then(a.id.cmp(&b.id)));
 
     let mut report = TsugumiHazawa::mano_aloe("rust");
@@ -252,5 +316,73 @@ mod tests {
         let b: Box<dyn std::any::Any + Send> = Box::new(String::from("动态"));
         assert_eq!(yukihana_lamy(&*a), "静态");
         assert_eq!(yukihana_lamy(&*b), "动态");
+    }
+
+    #[test]
+    fn home_redaction_matches_python_rule() {
+        let homes = vec!["C:\\Users\\alice".to_string(), "C:/Users/alice".to_string()];
+        // 大小写不敏感（PATH 里 c:\users 形态实测存在）
+        assert_eq!(
+            gaon("生效 c:\\users\\alice\\bin", &homes),
+            "生效 %USERPROFILE%\\bin"
+        );
+        // 正斜杠变体
+        assert_eq!(gaon("see C:/Users/alice/x", &homes), "see %USERPROFILE%/x");
+        // 多处出现全替换；非主目录路径原样保留
+        assert_eq!(
+            gaon("a C:\\Users\\ALICE\\1 与 C:\\Users\\alice\\2", &homes),
+            "a %USERPROFILE%\\1 与 %USERPROFILE%\\2"
+        );
+        assert_eq!(gaon(r"D:\work", &homes), r"D:\work");
+        assert_eq!(gaon("", &homes), "");
+        // 主目录是别的用户时不动
+        assert_eq!(gaon(r"C:\Users\bob\x", &homes), r"C:\Users\bob\x");
+    }
+
+    #[test]
+    fn home_variants_covers_slash_form_and_guards_degenerate() {
+        // 用真实环境跑一遍：非空时必含原样形态；USERPROFILE 与 HOME 都缺失时为空
+        let v = home_variants();
+        let env_home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        if env_home.is_empty() || env_home == "/" {
+            assert!(v.is_empty());
+        } else {
+            assert_eq!(v[0], env_home);
+            assert!(v.iter().any(|h| h == &env_home.replace('\\', "/")));
+        }
+    }
+
+    #[test]
+    fn report_never_contains_home_directory() {
+        // 引擎级保证：整份报告（含 JSON 转义形态）不得出现主目录字面量。
+        // 限定 env+hardware：回显路径的三个检查（path_validity / path_shadowing / temp）
+        // 都在这两类里，且不触网——全类别会把网络探针的耗时与抖动带进测试。
+        // 注意 JSON 会把反斜杠转义成 \\，直接拿原始路径搜会假阴性。
+        let cfg = MocaAoba {
+            categories: Some(vec!["env".into(), "hardware".into()]),
+            timeout_secs: Some(5),
+            ..Default::default()
+        };
+        let report = shishiro_botan(&cfg, None, None);
+        assert!(report.error.is_none());
+        let blob = serde_json::to_string(&report).expect("serialize");
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        if home.is_empty() || home == "/" {
+            return;
+        }
+        let escaped = home.replace('\\', "\\\\");
+        assert!(
+            !blob.to_lowercase().contains(&escaped.to_lowercase()),
+            "报告包含主目录字面量: {home}"
+        );
+        let fwd = home.replace('\\', "/");
+        assert!(
+            !blob.to_lowercase().contains(&fwd.to_lowercase()),
+            "报告包含主目录字面量(正斜杠): {home}"
+        );
     }
 }
