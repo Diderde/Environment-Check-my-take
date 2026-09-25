@@ -28,17 +28,14 @@
   提供，属操作系统组件，不单独列出。
 - MSVC 运行时（`vcruntime`/`msvcp` 等）随 Visual Studio 分发，按微软的再分发条款使用。
 
-## 旧实现（`Revamp/`，迁移完成后删除）
+## 关于被替换掉的旧实现
 
-迁移期的旧实现由 Rust 核心 + Python 层组成，其依赖在各自主清单里声明，不在本文件逐个登记：
+本仓库早期版本由 Rust 核心（C ABI 的 cdylib）+ Python 层（Typer CLI / Textual TUI / PySide6 GUI）组成，
+现已整体替换为上面的 C++ 实现；旧代码不在当前工作树里，只存在于提交历史（以及本地的 `backup-pre-rewrite` 分支）。
 
-- `Revamp/core/Cargo.toml`：`serde` / `serde_json`（MIT 或 Apache-2.0，双许可，取 MIT）。
-- `Revamp/pyproject.toml`：`typer`（MIT）、`textual`（MIT）、`rich`（MIT）、`PySide6`（**LGPL-3.0**）、
-  `pytest`（MIT，仅开发）。
-
-`PySide6` 是旧实现里唯一的非 MIT 兼容依赖：LGPL-3.0 允许动态链接使用，但要求随分发附带许可文本
-与可替换性说明。C++ 实现不再引入它，图形界面改用 Dear ImGui（MIT），因此**当前实现不含任何
-非 MIT 兼容依赖**。
+替换的直接理由之一就是**许可口径**：旧实现的 `PySide6` 是 **LGPL-3.0**，是本项目唯一的非 MIT 兼容依赖
+（LGPL-3.0 允许动态链接使用，但要求随分发附带许可文本与可替换性说明）。C++ 实现不再引入它，
+图形界面改用 Dear ImGui（MIT），因此**当前实现不含任何非 MIT 兼容依赖**。
 
 ## 维护约定
 

@@ -3,20 +3,20 @@ name: ci
 on:
   push:
     branches: [main]
-    paths: ["Revamp/**", "Cover/**", ".github/workflows/**"]
+    paths: ["Cover/**", "README.md", "THIRD_PARTY_LICENSES.md", ".github/workflows/**"]
   pull_request:
-    paths: ["Revamp/**", "Cover/**", ".github/workflows/**"]
+    paths: ["Cover/**", "README.md", "THIRD_PARTY_LICENSES.md", ".github/workflows/**"]
 
 jobs:
   cpp:
-    name: C++ 实现（Cover，构建 + 单元测试）
+    name: C++ 实现（构建 + 单元测试 + 命令行冒烟）
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      # 依赖（fmt / doctest，以及开了前端时的 ftxui / Dear ImGui / WIL）由 CMake FetchContent
+      # 依赖（fmt / doctest，以及前端用的 ftxui / Dear ImGui / WIL）由 CMake FetchContent
       # 现场拉取，版本在 Cover/CMakeLists.txt 里钉死，仓库里不存源码副本。
-      - name: 配置（含前端）
-        run: cmake -S Cover -B Cover/build-ci -G "Visual Studio 17 2022" -A x64 -DENVDECTOR_WITH_UI=ON
+      - name: 配置（默认形态：含 TUI/GUI）
+        run: cmake -S Cover -B Cover/build-ci -G "Visual Studio 17 2022" -A x64
       - name: 构建
         run: cmake --build Cover/build-ci --config Release
       - name: 单元测试
@@ -32,49 +32,7 @@ jobs:
           if ($rows.Count -lt 100) { throw "检查项数量异常：$($rows.Count)" }
           & $exe -c nosuchcategory
           if ($LASTEXITCODE -ne 2) { throw "未知类别应退出 2，实际 $LASTEXITCODE" }
-
-  rust:
-    name: Rust 核心（test + clippy）
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "Revamp/core"
-      - name: cargo test
-        run: cargo test --release --manifest-path Revamp/core/Cargo.toml
-        env:
-          CARGO_HTTP_CHECK_REVOKE: "false"
-      - name: cargo clippy（-D warnings）
-        run: cargo clippy --release --manifest-path Revamp/core/Cargo.toml -- -D warnings
-        env:
-          CARGO_HTTP_CHECK_REVOKE: "false"
-
-  python:
-    name: Python（unittest，项目 venv）
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "Revamp/core"
-      # 先构建核心 DLL：BindingTest 与 GBK 端到端测试都以 _dll_ready() 为门槛，
-      # 不构建的话这些集成测试在 CI 上永远 skip、形同虚设
-      - name: 构建 Rust 核心（供绑定与端到端测试加载）
-        run: cargo build --release --manifest-path Revamp/core/Cargo.toml
-        env:
-          CARGO_HTTP_CHECK_REVOKE: "false"
-      - name: 创建 venv 并安装依赖（含 GUI/TUI extras，顺带校验 pyproject）
-        run: |
-          python -m venv Revamp/.venv
-          Revamp/.venv/Scripts/python -m pip install -e "Revamp/app[gui,tui]"
-      - name: unittest（在项目 venv 内运行，与本地一致）
-        working-directory: Revamp
-        run: .venv/Scripts/python.exe -m unittest discover -s tests -v
+          # 默认形态应含前端：帮助里必须列出 tui/gui
+          $help = (& $exe --help) -join "`n"
+          if ($LASTEXITCODE -ne 0) { throw "--help 应退出 0" }
+          if ($help -notmatch "tui") { throw "帮助里没有 tui：前端未被编入" }
