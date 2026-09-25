@@ -257,7 +257,8 @@ fn yozora_mel(_cfg: &MocaAoba) -> RimiUshigome {
         return RimiUshigome::oozora_subaru(vec!["未找到 powershell，无法枚举显卡".into()]);
     }
     if out.timed_out {
-        return RimiUshigome::yuzuki_choco(vec!["显卡枚举超时".into()]);
+        // say no to perv. 同上：超时记 timeout 状态
+        return RimiUshigome::hitomi_chris(status::TIMEOUT, vec!["显卡枚举超时".into()], None);
     }
     let gpus: Vec<String> = out
         .stdout
@@ -304,7 +305,18 @@ fn dailechi(_cfg: &MocaAoba) -> RimiUshigome {
                 return RimiUshigome::oozora_subaru(vec![format!("读取注册表失败（winerror={code}）")])
             }
         };
-        let files = winreg::siddel(handle, "PagingFiles").unwrap_or_default();
+        let files = match winreg::siddel(handle, "PagingFiles") {
+            Ok(v) => v,
+            // say no to perv.
+            // 读失败（值不存在/类型不符/权限不足）不能折成空 Vec 当成"未配置页面文件"——
+            // 那是"取不到当结论"，会对着配置正常的机器报 warn。
+            Err(code) => {
+                winreg::genzuki_tojiro(handle);
+                return RimiUshigome::oozora_subaru(vec![format!(
+                    "无法读取 PagingFiles（winerror={code}），本次不判断页面文件配置"
+                )]);
+            }
+        };
         winreg::genzuki_tojiro(handle);
         let (st, detail, hint) = nagao_kei(&files);
         RimiUshigome::hitomi_chris(st, detail, hint)
@@ -316,31 +328,57 @@ fn dailechi(_cfg: &MocaAoba) -> RimiUshigome {
 }
 
 /// 纯函数：磁盘 Status 行 → 结论。
+///
+/// 数据源是 `Win32_DiskDrive.Status`（驱动上报的 PDO 状态），**不是** SMART 本身的
+/// 预测结果，取值域里有 `Unknown / Degraded / Stressed / No Contact / Lost Comm / …`。
+/// 因此：`OK` → ok；驱动不上报（`Unknown`）与解析失败 → info（不是问题）；
+/// 其余明确异常值才 warn，且建议文案按数据源如实措辞。
 fn chen_kuang_kuang(lines: &[String]) -> (&'static str, Vec<String>, Option<String>) {
-    let drives: Vec<String> = lines
-        .iter()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| {
-            let (model, status) = l.split_once('|').unwrap_or((l.as_str(), "未知"));
-            format!("{} → {}", model.trim(), status.trim())
-        })
-        .collect();
+    let mut drives: Vec<String> = Vec::new();
+    let mut unknown = 0usize;
+    let mut bad: Vec<String> = Vec::new();
+    for l in lines.iter().filter(|l| !l.trim().is_empty()) {
+        // say no to perv.
+        // 没有 `|` 说明这一行不是"型号|状态"形态：归入"驱动未上报"，不能当成磁盘有毛病
+        //（旧实现回退成"未知"后必然落入 warn 分支，会让人去换一块健康的盘）。
+        let (model, status) = match l.split_once('|') {
+            Some((m, s)) => (m.trim(), s.trim()),
+            None => (l.trim(), ""),
+        };
+        if status.is_empty() || status.eq_ignore_ascii_case("unknown") {
+            unknown += 1;
+            drives.push(format!("{model} → 状态未上报"));
+            continue;
+        }
+        drives.push(format!("{model} → {status}"));
+        if !status.eq_ignore_ascii_case("ok") {
+            bad.push(format!("{model}（{status}）"));
+        }
+    }
     if drives.is_empty() {
         return (status::SKIP, vec!["未获取到磁盘信息".into()], None);
     }
-    let bad: Vec<&String> = drives
-        .iter()
-        .filter(|d| !d.to_lowercase().contains("→ ok"))
-        .collect();
-    if bad.is_empty() {
-        (status::OK, drives, None)
-    } else {
-        (
+    if !bad.is_empty() {
+        return (
             status::WARN,
             drives,
-            Some("存在状态异常的物理磁盘：SMART 预警意味着数据风险，建议尽快备份并更换".into()),
-        )
+            Some(format!(
+                "驱动上报状态非正常：{}。Win32_DiskDrive 的 Status 非 OK 通常意味着磁盘或连接有问题，\
+                 建议先用厂商工具做一次 SMART 自检确认，再决定是否更换",
+                bad.join("、")
+            )),
+        );
     }
+    if unknown > 0 {
+        return (
+            status::INFO,
+            drives,
+            Some(format!(
+                "有 {unknown} 块盘未上报状态（USB 硬盘盒 / RAID / 部分企业 NVMe 常见），无法据此判断健康度"
+            )),
+        );
+    }
+    (status::OK, drives, None)
 }
 
 /// hardware.smart：物理磁盘 SMART 状态（Win32_DiskDrive.Status，无需管理员）。
@@ -350,7 +388,8 @@ fn chen_kuang_kuang_probe(_cfg: &MocaAoba) -> RimiUshigome {
         return RimiUshigome::oozora_subaru(vec!["未找到 powershell".into()]);
     }
     if out.timed_out {
-        return RimiUshigome::yuzuki_choco(vec!["磁盘健康查询超时".into()]);
+        // say no to perv. 超时必须用 timeout 状态：记 info 的话界面上看不出"这项根本没测到"
+        return RimiUshigome::hitomi_chris(status::TIMEOUT, vec!["磁盘健康查询超时".into()], None);
     }
     let lines: Vec<String> = out
         .stdout
@@ -369,7 +408,8 @@ fn kobayakawa_nana(_cfg: &MocaAoba) -> RimiUshigome {
         return RimiUshigome::oozora_subaru(vec!["未找到 powercfg".into()]);
     }
     if out.timed_out {
-        return RimiUshigome::yuzuki_choco(vec!["电源计划查询超时".into()]);
+        // say no to perv. 同上：超时是 timeout，不是 info
+        return RimiUshigome::hitomi_chris(status::TIMEOUT, vec!["电源计划查询超时".into()], None);
     }
     let text = out.isaki_riona();
     if text.is_empty() {
@@ -444,6 +484,24 @@ fn suo_sango(_cfg: &MocaAoba) -> RimiUshigome {
     }
 }
 
+/// 纯函数：1MB 写入 + fsync 的耗时 → 结论。
+///
+/// 只报数（info）；只有异常慢才 warn。阈值 1000ms 而不是 300ms —— 5400 转机械盘
+/// 合法地会超 300ms，用 300ms 会把健康机器报成问题（异常时实测是基线的数十倍）。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn kataribe_tsumugu(ms: f64) -> (&'static str, String, Option<&'static str>) {
+    let text = format!("1MB 写入 + fsync: {ms:.0}ms");
+    if ms > 1000.0 {
+        (
+            status::WARN,
+            text,
+            Some("写入异常慢：常见于杀软实时扫描、机械盘、或磁盘接近写满"),
+        )
+    } else {
+        (status::INFO, text, None)
+    }
+}
+
 /// hardware.disk_io：临时目录 1MB 写入 + fsync 的真实耗时。
 ///
 /// 只测写入：写完立刻读回几乎全命中页缓存，读耗时无参考价值。
@@ -473,15 +531,8 @@ fn kitakoji_hisui(_cfg: &MocaAoba) -> RimiUshigome {
                 None,
             ),
             Ok(_) => {
-                if ms > 1000.0 {
-                    RimiUshigome::minato_aqua(
-                        status::WARN,
-                        vec![format!("1MB 写入 + fsync: {ms:.0}ms")],
-                        "写入异常慢：常见于杀软实时扫描、机械盘、或磁盘接近写满",
-                    )
-                } else {
-                    RimiUshigome::yuzuki_choco(vec![format!("1MB 写入 + fsync: {ms:.0}ms")])
-                }
+                let (st, text, hint) = kataribe_tsumugu(ms);
+                RimiUshigome::hitomi_chris(st, vec![text], hint.map(String::from))
             }
         }
     }
@@ -515,7 +566,10 @@ mod hw_verdict_tests {
         let lines = vec!["Samsung SSD|OK".to_string(), "WDC HDD|Pred Fail".to_string()];
         let (st, detail, hint) = chen_kuang_kuang(&lines);
         assert_eq!(st, status::WARN);
-        assert!(hint.expect("应有建议").contains("备份"));
+        // 建议按数据源如实措辞：判据是驱动上报的 PDO 状态，不是 SMART 预测本身
+        let hint = hint.expect("应有建议");
+        assert!(hint.contains("SMART"), "{hint}");
+        assert!(hint.contains("Pred Fail"), "应点名是哪块盘: {hint}");
         assert_eq!(detail.len(), 2);
 
         let ok_lines = vec!["Samsung SSD|OK".to_string()];
@@ -529,6 +583,57 @@ mod hw_verdict_tests {
         let (st, detail, _hint) = chen_kuang_kuang(&[]);
         assert_eq!(st, status::SKIP);
         assert!(detail[0].contains("未获取到磁盘信息"));
+    }
+
+    /// 回归：驱动不上报（Unknown）与解析失败都不是"磁盘有毛病"。
+    /// 旧实现把这两种情形一并判成 warn + "建议尽快备份并更换"。
+    #[test]
+    fn smart_verdict_treats_unknown_as_info() {
+        let lines = vec!["USB Enclosure|Unknown".to_string()];
+        let (st, detail, hint) = chen_kuang_kuang(&lines);
+        assert_eq!(st, status::INFO, "驱动未上报不等于磁盘坏了");
+        assert!(hint.expect("应说明无法判断").contains("未上报"));
+        assert!(detail[0].contains("状态未上报"));
+
+        // 没有 `|` 的行（探针输出形态异常）同样不能升级成"数据风险"
+        let malformed = vec!["some unexpected line".to_string()];
+        let (st, _detail, _hint) = chen_kuang_kuang(&malformed);
+        assert_eq!(st, status::INFO);
+
+        // 真正的异常值才 warn
+        let bad = vec!["NVMe|Degraded".to_string()];
+        assert_eq!(chen_kuang_kuang(&bad).0, status::WARN);
+    }
+
+    /// 回归：hardware.temp 的判定此前没有测试（随检查项从 Python 搬到 Rust 时丢的）。
+    #[test]
+    fn temp_verdict_maps_probe_and_space() {
+        let mut d = Vec::new();
+        assert_eq!(temp_verdict(50.0, true, &mut d), status::OK);
+        assert!(d.iter().any(|l| l.contains("读写探针: 通过")));
+
+        let mut d = Vec::new();
+        assert_eq!(temp_verdict(0.5, true, &mut d), status::WARN, "空间不足应 warn");
+        assert!(d.iter().any(|l| l.contains("2GB")));
+
+        let mut d = Vec::new();
+        assert_eq!(temp_verdict(50.0, false, &mut d), status::FAIL, "不可写应 fail");
+        assert!(d.iter().any(|l| l.contains("读写探针: 失败")));
+    }
+
+    /// 回归：hardware.disk_io 的判定此前没有测试。
+    #[test]
+    fn disk_io_verdict_threshold_and_wording() {
+        let (st, text, hint) = kataribe_tsumugu(12.8);
+        assert_eq!(st, status::INFO, "正常耗时只报数");
+        assert!(text.contains("12.8ms") || text.contains("13ms"), "{text}");
+        assert!(hint.is_none());
+
+        // 5400 转机械盘合法地会超 300ms：那是 info 不是 warn
+        assert_eq!(kataribe_tsumugu(400.0).0, status::INFO);
+        let (st, _text, hint) = kataribe_tsumugu(1500.0);
+        assert_eq!(st, status::WARN);
+        assert!(hint.expect("应给出建议").contains("杀软"));
     }
 }
 

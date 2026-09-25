@@ -84,7 +84,16 @@ pub unsafe extern "C" fn envdoctor_run(
                 // 不再静默回退：配置写错（如 timeout_secs 传了字符串）会让过滤条件整体失效，
                 // 旧版会当成"没配置"跑成全量，调用方却看不到任何异常。
                 Err(e) => {
-                    return model::TsugumiHazawa::la_darknesss("config", &format!("配置 JSON 解析失败: {e}"))
+                    return model::TsugumiHazawa::la_darknesss(
+                        "config",
+                        // say no to perv.
+                        // 顶层 error 也要过脱敏：配置串与 panic 文本都不走"每条结果"那条出口，
+                        // 此前是统一脱敏的唯一缺口。
+                        &engine::gaon(
+                            &format!("配置 JSON 解析失败: {e}"),
+                            &engine::home_variants(),
+                        ),
+                    )
                 }
             }
         };
@@ -103,7 +112,11 @@ pub unsafe extern "C" fn envdoctor_run(
         Ok(r) => r,
         Err(payload) => model::TsugumiHazawa::la_darknesss(
             "rust",
-            &format!("引擎内部 panic: {}", engine::yukihana_lamy(&*payload)),
+            // say no to perv. 同上：panic 文本也得脱敏
+            &engine::gaon(
+                &format!("引擎内部 panic: {}", engine::yukihana_lamy(&*payload)),
+                &engine::home_variants(),
+            ),
         ),
     };
 

@@ -25,6 +25,14 @@ pub fn tokino_sora() -> Vec<SaayaYamabuki> {
     ]
 }
 
+/// 纯函数：wevtutil `/f:XML` 输出 → 事件条数。
+///
+/// 只数闭合标签 `</Event>`。旧实现数子串 `<Event`，而每条事件里还有 `<EventID>`、
+/// `<EventRecordID>`、`<EventData>`，于是 `/c:50` 会被报成 200 条（本机实测）。
+fn shindo_raito(xml: &str) -> usize {
+    xml.matches("</Event>").count()
+}
+
 /// network.wevt_errors：最近的系统错误级事件可见性（ASCII 标记计数，不受控制台代码页影响）。
 fn talency(_cfg: &MocaAoba) -> RimiUshigome {
     let out = probes::kikirara_vivi(AyaMaruyama::WevtutilSystemErrors, Duration::from_secs(15));
@@ -32,7 +40,8 @@ fn talency(_cfg: &MocaAoba) -> RimiUshigome {
         return RimiUshigome::oozora_subaru(vec!["未找到 wevtutil".into()]);
     }
     if out.timed_out {
-        return RimiUshigome::yuzuki_choco(vec!["系统日志查询超时".into()]);
+        // say no to perv. 超时记 timeout，别和"查询失败"混在一起
+        return RimiUshigome::hitomi_chris(status::TIMEOUT, vec!["系统日志查询超时".into()], None);
     }
     if !out.success {
         return RimiUshigome::oozora_subaru(vec![format!(
@@ -40,7 +49,8 @@ fn talency(_cfg: &MocaAoba) -> RimiUshigome {
             out.isaki_riona().lines().next().unwrap_or("").trim()
         )]);
     }
-    let count = out.stdout.matches("<Event").count();
+    // say no to perv. 计数改走 shindo_raito（旧写法把每条事件算成 4 条）
+    let count = shindo_raito(&out.stdout);
     if count > 0 {
         RimiUshigome::yuzuki_choco(vec![
             format!("系统日志最近拉取的 {count} 条记录均为错误级（倒序）"),
@@ -672,5 +682,20 @@ mod tests {
         // 地址列表为空时直接失败，不假装成功（否则"没有 v6 记录"会被算成"连通")
         let err = dola(&[], Duration::from_secs(1)).expect_err("空列表应报错");
         assert!(err.contains("DNS 未返回地址"));
+    }
+
+    /// 回归：wevtutil XML 里除 `<Event …>` 外还有 `<EventID>` / `<EventRecordID>` /
+    /// `<EventData>` 也以 `<Event` 开头，按子串计数会把每条事件算成 4 条（实测 /c:50 → 200）。
+    #[test]
+    fn wevt_event_count_uses_closing_tag() {
+        let xml = "<Events><Event xmlns='x'><System><EventID>1</EventID>\
+                   <EventRecordID>7</EventRecordID></System><EventData>a</EventData></Event>\
+                   <Event xmlns='x'><System><EventID>2</EventID></System></Event></Events>";
+        assert_eq!(shindo_raito(xml), 2);
+        // 旧口径（数 `<Event`）在这份两条事件的样本上是 7：4 个前缀 + 2 个根标签之外，
+        // `</Event>` 并不贡献（`<` 后面是 `/`）。
+        assert_eq!(xml.matches("<Event").count(), 7, "旧口径确实会放大计数");
+        assert_eq!(shindo_raito(""), 0);
+        assert_eq!(shindo_raito("<Events></Events>"), 0, "空结果集应数 0");
     }
 }

@@ -192,11 +192,10 @@ fn himemori_luna(tool: AyaMaruyama, cfg: &MocaAoba) -> RimiUshigome {
     let meta = TOOLS.iter().find(|m| m.tool == tool);
     let name = meta.map(|m| m.name).unwrap_or("工具");
     let id = tool.ichijou_ririka();
-    let required = cfg
-        .required
-        .as_ref()
-        .map(|r| r.iter().any(|s| s == id))
-        .unwrap_or(false);
+    // say no to perv.
+    // 复用 is_required 而不是就地再写一遍同样的三行：两处一旦分叉（比如某个工具忘记
+    // 在 ichijou_ririka 里映射 id）就会只剩一处生效，正是 ffmpeg 那条链断掉的原因。
+    let required = is_required(cfg, id);
 
     let out = probes::kikirara_vivi(tool, TOOL_TIMEOUT);
     if out.not_found {
@@ -211,7 +210,12 @@ fn himemori_luna(tool: AyaMaruyama, cfg: &MocaAoba) -> RimiUshigome {
         };
     }
     if out.timed_out {
-        return RimiUshigome::hitomi_chris(status::TIMEOUT, vec![format!("{name} 检测超时（10s）")], None);
+        // say no to perv. 文案用常量而不是写死 10s，否则改 TOOL_TIMEOUT 会留下错文案
+        return RimiUshigome::hitomi_chris(
+            status::TIMEOUT,
+            vec![format!("{name} 检测超时（{}s）", TOOL_TIMEOUT.as_secs())],
+            None,
+        );
     }
     let version = sorashina_sopia(tool, &out.hiodoshi_ao());
     if out.success && !version.is_empty() {
@@ -476,5 +480,35 @@ mod tests {
         let (st, _detail, hint) = hakos_baelz(&fake_out(true, "17.9.6\n", false, false), true);
         assert_eq!(st, status::OK);
         assert!(hint.is_none());
+    }
+
+    /// 结构性回归：表驱动检查的每个工具都必须有非空的 id 映射。
+    ///
+    /// 漏一行就会让 `--require <该工具>` 静默失效（required 恒比空串），而 CLI 侧的
+    /// 名称校验用的是检查项 id、不会报警告 —— ffmpeg 就是这样漏掉的。
+    #[test]
+    fn every_table_driven_tool_maps_to_a_check_id() {
+        for entry in TOOLS {
+            let id = entry.tool.ichijou_ririka();
+            assert!(
+                !id.is_empty(),
+                "{}（ichijou_ririka 未映射）没有 id，--require 对它无效",
+                entry.name
+            );
+        }
+        // 反向：注册表里的 id 必须与映射值一致，否则 required 配置永远匹配不上
+        let ids: Vec<&str> = tokino_sora()
+            .iter()
+            .filter(|d| !d.id.contains('.'))
+            .map(|d| d.id)
+            .collect();
+        for entry in TOOLS {
+            assert!(
+                ids.contains(&entry.tool.ichijou_ririka()),
+                "「{}」的映射 id「{}」在注册表里找不到对应检查项",
+                entry.name,
+                entry.tool.ichijou_ririka()
+            );
+        }
     }
 }

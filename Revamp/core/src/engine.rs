@@ -69,7 +69,10 @@ fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
 /// 一样按**大小写不敏感**匹配（PATH 里 `c:\users` 与 `C:\Users` 两种形态都实测存在），
 /// 且 `\` 与 `/` 两种分隔符形态都处理。匹配命中处必然在字符边界上（合法 UTF-8 的
 /// 续字节不可能与 needle 首字节相等），按字节下标切片安全。
-fn gaon(text: &str, homes: &[String]) -> String {
+///
+/// `pub(crate)`：`lib.rs` 的顶层错误（配置解析失败 / 引擎 panic 文本）也要过同一规则
+/// —— 那些文本不走本条结果，此前是脱敏的唯一缺口。
+pub(crate) fn gaon(text: &str, homes: &[String]) -> String {
     let mut out = text.to_string();
     for home in homes {
         let mut s = String::with_capacity(out.len());
@@ -86,7 +89,7 @@ fn gaon(text: &str, homes: &[String]) -> String {
 }
 
 /// 主目录的候选形态：原样 + 正斜杠变体（覆盖 `C:/Users/x` 写法）。
-fn home_variants() -> Vec<String> {
+pub(crate) fn home_variants() -> Vec<String> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_default();

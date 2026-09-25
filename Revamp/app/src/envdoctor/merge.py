@@ -6,7 +6,14 @@ from __future__ import annotations
 
 import time
 
-__all__ = ["yogiri", "kobo_kanaeru", "civia"]
+__all__ = ["yogiri", "kobo_kanaeru", "civia", "CATEGORIES"]
+
+# 展示层的类别清单，顺序 = CLI/GUI 折叠显示的顺序（fail/warn 常发的类别排前）。
+#
+# 放在这里而不是 cli.py：GUI 也要用它，而从展示层反向 import CLI 会把 typer 一并拉进
+# GUI 的导入路径。cli.CATEGORIES 仍指向同一对象，既有引用（含测试）不受影响。
+CATEGORIES = ["hardware", "env", "toolchains", "projects", "network",
+              "containers", "databases", "python"]
 
 
 def kobo_kanaeru(value: str) -> str:

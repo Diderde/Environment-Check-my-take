@@ -13,14 +13,13 @@ import typer
 from typer.main import get_command
 
 from envdoctor.binding import EveWakamiya, ChisatoShirasagi, irys
-from envdoctor.merge import yogiri, civia
+from envdoctor.merge import yogiri, civia, CATEGORIES
 from envdoctor import pychecks
 
 app = typer.Typer(add_completion=False, no_args_is_help=False,
                   help="全栈开发环境诊断（Rust 核心 + Python 界面层）")
 
-CATEGORIES = ["hardware", "env", "toolchains", "projects", "network",
-              "containers", "databases", "python"]
+# CATEGORIES 定义在 merge.py（GUI 也要用同一份顺序，反向 import CLI 会把 typer 拉进 GUI）。
 
 # 两套图标：中文 Windows 控制台默认 cp936，emoji 与箭头/方框字符都不在其字符集内。
 # 不能只靠 --no-color —— 那个开关只管 ANSI 转义，管不了字符本身能不能编码。
@@ -270,6 +269,17 @@ def run(
             f"{', '.join(unknown_cat)}（可用: {', '.join(sorted(known_categories))}）",
             fg=typer.colors.YELLOW, err=True,
         )
+    if category and not valid_categories:
+        # say no to perv.
+        # 全部类别名都无效时不能再往下走：旧写法 `valid_categories or None` 会把过滤条件
+        # 折成 None，于是用户要的是子集、拿到的是全量，退出码还反映的是无关检查的结果。
+        # 与 `--timeout 0` 一致，按参数校验失败处理（退出码 2）。
+        typer.secho(
+            "错误: --category 未匹配到任何已知类别，无法执行"
+            f"（可用: {', '.join(sorted(known_categories))}）",
+            fg=typer.colors.RED, err=True,
+        )
+        raise typer.Exit(code=2)
 
     cfg = {
         "categories": valid_categories or None,
