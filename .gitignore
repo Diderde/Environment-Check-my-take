@@ -12,3 +12,5 @@ envdoctor-report.json
 # C++ 实现（Cover 线）
 Cover/build/
 Cover/.deps/
+Cover/build-*/
+Cover/.deps-*/

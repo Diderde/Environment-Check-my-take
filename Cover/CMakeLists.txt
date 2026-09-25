@@ -51,22 +51,45 @@ target_link_libraries(envdoctor_base
   PUBLIC fmt::fmt
   PRIVATE envdoctor_flags)
 
+# Windows 平台层：注册表、外部工具白名单。
+add_library(envdoctor_win STATIC
+  src/win/registry.cpp
+  src/win/tools.cpp)
+target_link_libraries(envdoctor_win
+  PUBLIC envdoctor_base
+  PRIVATE envdoctor_flags)
+
 # 报告与引擎：报告契约、JSON 序列化、检查项注册与调度。
 add_library(envdoctor_core STATIC
+  src/checks/containers.cpp
+  src/checks/databases.cpp
+  src/checks/env.cpp
+  src/checks/hardware.cpp
   src/checks/mod.cpp
+  src/checks/network.cpp
+  src/checks/python.cpp
+  src/checks/toolchains.cpp
   src/engine/engine.cpp
   src/report/json.cpp
   src/report/model.cpp)
 target_link_libraries(envdoctor_core
-  PUBLIC envdoctor_base
+  PUBLIC envdoctor_win
   PRIVATE envdoctor_flags)
 
 add_executable(envdoctor_tests
   tests/main.cpp
   tests/test_base.cpp
+  tests/test_checks.cpp
+  tests/test_containers.cpp
+  tests/test_databases.cpp
+  tests/test_env.cpp
   tests/test_fs.cpp
+  tests/test_hardware.cpp
+  tests/test_network.cpp
   tests/test_process.cpp
-  tests/test_report.cpp)
+  tests/test_python.cpp
+  tests/test_report.cpp
+  tests/test_toolchains.cpp)
 target_link_libraries(envdoctor_tests
   PRIVATE envdoctor_core doctest::doctest envdoctor_flags)
 
