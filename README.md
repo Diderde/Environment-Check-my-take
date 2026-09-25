@@ -19,6 +19,10 @@ cmake --build Cover/build --config Release
 
 ## 使用
 
+双击仓库根目录的 `start.bat` 也行：找不到构建产物时它会引导构建（可只建命令行，快一些），
+然后从菜单选图形界面 / 终端界面 / 全量诊断 / 列出检查项。启动器自身的文字是纯 ASCII
+（bat 的解析依赖当前代码页，混入非 ASCII 在 UTF-8 终端下会被读坏），程序界面仍是中文。
+
 ```bash
 envdoctor                                   # 全量诊断，按类别折叠显示（无参即跑，等同于 run）
 envdoctor --list-checks                     # 列出全部检查项
