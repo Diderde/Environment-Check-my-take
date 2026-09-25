@@ -36,6 +36,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "Revamp/core"
+      # 先构建核心 DLL：BindingTest 与 GBK 端到端测试都以 _dll_ready() 为门槛，
+      # 不构建的话这些集成测试在 CI 上永远 skip、形同虚设
+      - name: 构建 Rust 核心（供绑定与端到端测试加载）
+        run: cargo build --release --manifest-path Revamp/core/Cargo.toml
+        env:
+          CARGO_HTTP_CHECK_REVOKE: "false"
       - name: 创建 venv 并安装依赖（含 GUI/TUI extras，顺带校验 pyproject）
         run: |
           python -m venv Revamp/.venv

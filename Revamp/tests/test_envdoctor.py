@@ -924,8 +924,6 @@ class D3ChecksTest(unittest.TestCase):
 
 
 
-    @skipUnless(sys.platform == "win32", "注册表探测仅 Windows")
-
     # ---- env.temp_path
     def test_temp_path_judgement_matrix(self):
         self.assertEqual(pychecks.takamiya_rion(r"C:\Temp", r"C:\Temp", True, True)[0], "ok")

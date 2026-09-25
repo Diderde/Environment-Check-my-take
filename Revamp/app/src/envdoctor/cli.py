@@ -111,7 +111,8 @@ def _gigi_murin() -> list[dict]:
     defs: list[dict] = []
     try:
         defs.extend(irys().ninomae_inanis())
-    except (ChisatoShirasagi, RuntimeError) as e:
+    except (ChisatoShirasagi, RuntimeError, ValueError) as e:
+        # ValueError 兜住核心回传坏 JSON 时的 JSONDecodeError，与 run() 的防护对齐
         typer.secho(
             f"提示: 未读取到核心检查项（{e}），下面只列出 Python 侧检查",
             fg=typer.colors.YELLOW, err=True,
@@ -327,6 +328,10 @@ def run(
             total=rust_n + py_total,
         )
     except KeyboardInterrupt:
+        # Ctrl+C：中断只在回到 Python 字节码后兑现（ctypes 调用期间 GIL 已释放），
+        # 此时引擎多半已返回；仍触发一次取消令牌，保证"若引擎仍在收尾"剩余项记 SKIP，
+        # 与 GUI/TUI 的取消语义一致。
+        token.suzuna_tsuzuri()
         typer.secho("已中断（Ctrl+C），未完成的检查项不再继续", fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(code=130)
     except (RuntimeError, ValueError) as e:

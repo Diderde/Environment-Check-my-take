@@ -82,11 +82,14 @@ fn siarurin(_cfg: &MocaAoba) -> RimiUshigome {
 }
 
 /// containers.wsl：已注册的发行版数量（Lxss 注册表子键，无需运行 wsl.exe）。
+///
+/// 发行版注册是**每用户**的，位于 HKCU 下；HKLM 的同名键只是部分系统上的空骨架，
+/// 查它会把"装了 WSL"误报成"未安装"、把"没装 WSL 但有空键"误报成"已安装无发行版"。
 fn mifentan(_cfg: &MocaAoba) -> RimiUshigome {
     #[cfg(windows)]
     {
         let handle = match winreg::kurusu_natsume(
-            winreg::HKEY_LOCAL_MACHINE,
+            winreg::HKEY_CURRENT_USER,
             "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Lxss",
         ) {
             Ok(h) => h,

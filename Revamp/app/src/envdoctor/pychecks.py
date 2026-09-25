@@ -35,6 +35,10 @@ PYTHON_CATEGORY = "python"
 # 列表类明细每项的条数上限：detail 按"一条一行"渲染，无限列会把报告撑成一堵墙
 _PATH_LIST_MAX = 3
 
+# 无控制台宿主（pythonw / GUI 启动器）下，pip/git/where 子进程会闪黑色控制台窗口；
+# 与 Rust 侧 probes.rs 的 CREATE_NO_WINDOW 对齐。控制台宿主下该标志无副作用。
+_SUBPROCESS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
 _COLD_IMPORT_CODE = (
     "import sys, time\n"
     "t = time.perf_counter()\n"
@@ -107,6 +111,7 @@ def _rosalyn(args: list[str], timeout: int) -> tuple[bool, str]:
     r = subprocess.run(
         [sys.executable, "-m", "pip", *args],
         capture_output=True, timeout=timeout,
+        creationflags=_SUBPROCESS_NO_WINDOW,
     )
     text = _spade_echo(r.stdout) or _spade_echo(r.stderr)
     return r.returncode == 0, text.strip()
@@ -136,7 +141,8 @@ def kanade_izuru(cfg: dict) -> dict:
         # 被扫描目录里放一个 where.exe/git.exe 就会被执行。先按 PATH 解析成绝对路径
         # （解析不到再回落裸名——System32 里的 where.exe 实际总在，走不到回落）。
         where_exe = shutil.which("where.exe") or "where.exe"
-        r = subprocess.run([where_exe, "python"], capture_output=True, timeout=8)
+        r = subprocess.run([where_exe, "python"], capture_output=True, timeout=8,
+                           creationflags=_SUBPROCESS_NO_WINDOW)
         found = [l.strip() for l in _spade_echo(r.stdout).splitlines() if l.strip()]
         detail = [f"where python: {p}" for p in found[:_PATH_LIST_MAX]]
         if len(found) > _PATH_LIST_MAX:
@@ -155,7 +161,8 @@ def kanade_izuru(cfg: dict) -> dict:
         py = shutil.which("py")
         if py:
             # 用解析出的绝对路径，理由同上
-            r2 = subprocess.run([py, "-0p"], capture_output=True, timeout=8)
+            r2 = subprocess.run([py, "-0p"], capture_output=True, timeout=8,
+                                creationflags=_SUBPROCESS_NO_WINDOW)
             rows = [l.strip() for l in _spade_echo(r2.stdout).splitlines() if l.strip()]
             if rows:
                 # 一个解释器一条：detail 的契约是"单行"。旧版把整段列表内嵌换行塞进一条，
@@ -306,6 +313,7 @@ def _yukoku_roberu(lib: str):
         r = subprocess.run(
             [sys.executable, "-c", _COLD_IMPORT_CODE, lib],
             capture_output=True, timeout=10,
+            creationflags=_SUBPROCESS_NO_WINDOW,
         )
         text = _spade_echo(r.stdout).strip()
         try:
@@ -508,7 +516,12 @@ class KokoroTsurumaki(ctypes.Structure):
     ]
 
 class RinkoShirokane(ctypes.Structure):
-    """SYSTEM_LOGICAL_PROCESSOR_INFORMATION（GetLogicalProcessorInformation）。"""
+    """SYSTEM_LOGICAL_PROCESSOR_INFORMATION（GetLogicalProcessorInformation）。
+
+    布局按 **64 位进程**对齐（size_t=8 → union 载荷偏移 16）；32 位 Python 下
+    结构体会比系统预期的小，枚举结果不可信——但 octavio() 对失败有兜底（返回 0，
+    检查降级为只报逻辑核数），只是不精确，不会崩。
+    """
 
     _fields_ = [
         ("ProcessorMask", ctypes.c_size_t),
@@ -649,7 +662,8 @@ def moira(cfg: dict) -> dict:
         t0 = time.perf_counter()
         try:
             subprocess.run([sys.executable, "-c", "pass"], capture_output=True,
-                           timeout=max(3, min(budget, 20)))
+                           timeout=max(3, min(budget, 20)),
+                           creationflags=_SUBPROCESS_NO_WINDOW)
         except subprocess.TimeoutExpired:
             return _doris("python.startup", "解释器启动", "warn", ["解释器启动超时"],
                           hint="启动一个空脚本都超时，通常意味着启动钩子/杀软扫描把解释器卡住了")
@@ -665,9 +679,10 @@ def elu(_cfg: dict) -> dict:
     """python.pip_env：pip 配置文件位置与 index-url、缓存体积、site-packages 位置。"""
     detail: list[str] = []
     if sys.platform == "win32":
-        home = Path(os.path.expanduser("~"))
-        cands = [home / "pip" / "pip.ini",
-                 Path(os.environ.get("APPDATA", str(home))) / "pip" / "pip.ini",
+        # Windows 下 pip 实际读取的是 %APPDATA%\pip\pip.ini（用户级）与
+        # %PROGRAMDATA%\pip\pip.ini（系统级）；~/pip/pip.ini 不是 pip 的读取位置，
+        # 列进去会暗示"pip 在用它"而误导。
+        cands = [Path(os.environ.get("APPDATA", str(Path(os.path.expanduser("~"))))) / "pip" / "pip.ini",
                  Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "pip" / "pip.ini"]
     else:
         home = Path(os.path.expanduser("~"))
@@ -688,14 +703,15 @@ def elu(_cfg: dict) -> dict:
         detail.append("未找到 pip 配置文件（使用默认源）")
     try:
         r = subprocess.run([sys.executable, "-m", "pip", "cache", "dir"],
-                           capture_output=True, timeout=10)
+                           capture_output=True, timeout=10,
+                           creationflags=_SUBPROCESS_NO_WINDOW)
         lines = [l for l in _spade_echo(r.stdout).splitlines() if l.strip()]
         if r.returncode == 0 and lines:
             cache = Path(lines[0].strip())
             if cache.is_dir():
                 stat = crimzon_ruze(cache)
                 tail = "（已达统计上限，为下界）" if stat["truncated"] else ""
-                detail.append(f"缓存: {stat['files']} 个文件 / {stat['bytes'] / 2 ** 20:.1f}MB{tail}")
+                detail.append(f"缓存: {stat['files']} 个条目 / {stat['bytes'] / 2 ** 20:.1f}MB{tail}")
             else:
                 detail.append("缓存目录不存在")
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -1075,7 +1091,8 @@ def harusaki_air(cfg: dict) -> dict:
     timeout = min(max(budget, 30), 60)
     try:
         r = subprocess.run([sys.executable, "-m", "pip", "check"],
-                           capture_output=True, timeout=timeout)
+                           capture_output=True, timeout=timeout,
+                           creationflags=_SUBPROCESS_NO_WINDOW)
     except subprocess.TimeoutExpired:
         return _doris(id_, title, "skip", [f"pip check 超时（>{timeout}s）"],
                       hint="环境很大或磁盘慢时会超时；可单独跑 python -m pip check 复核")
@@ -1434,7 +1451,8 @@ def achikita_chinami(repo, timeout: int = _PROJECTS_GIT_TIMEOUT) -> dict:
         git_exe = shutil.which("git") or "git"  # 先解析绝对路径，理由见 kenmochi_toya
         r = subprocess.run([git_exe, "--no-optional-locks", "-C", str(repo),
                             "status", "--porcelain", "-z"],
-                           capture_output=True, timeout=timeout)
+                           capture_output=True, timeout=timeout,
+                           creationflags=_SUBPROCESS_NO_WINDOW)
     except subprocess.TimeoutExpired:
         out["error"] = f"status 超时（>{timeout}s）"
     except OSError as e:
