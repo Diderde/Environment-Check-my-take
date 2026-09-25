@@ -80,6 +80,7 @@ add_executable(envdoctor_tests
   tests/main.cpp
   tests/test_base.cpp
   tests/test_checks.cpp
+  tests/test_cli.cpp
   tests/test_containers.cpp
   tests/test_databases.cpp
   tests/test_env.cpp
@@ -92,6 +93,13 @@ add_executable(envdoctor_tests
   tests/test_toolchains.cpp)
 target_link_libraries(envdoctor_tests
   PRIVATE envdoctor_core doctest::doctest envdoctor_flags)
+
+# 命令行程序。
+add_executable(envdoctor
+  src/cli/cli.cpp
+  src/main.cpp)
+target_link_libraries(envdoctor
+  PRIVATE envdoctor_core envdoctor_flags)
 
 enable_testing()
 add_test(NAME base COMMAND envdoctor_tests)
