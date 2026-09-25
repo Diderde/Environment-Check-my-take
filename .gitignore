@@ -8,3 +8,7 @@ core/target/
 rustup-init.exe
 report.json
 envdoctor-report.json
+
+# C++ 实现（Cover 线）
+Cover/build/
+Cover/.deps/
