@@ -52,7 +52,16 @@ fn yingou(_cfg: &MocaAoba) -> RimiUshigome {
                 "SMBv1 存在已知漏洞且已被现代系统默认弃用；无 legacy 设备对接需求时建议关闭",
             ),
             Ok(0) => RimiUshigome::nakiri_ayame(vec!["SMBv1 已显式禁用".into()]),
-            _ => RimiUshigome::nakiri_ayame(vec!["SMB1 未显式配置（新版 Windows 默认不启用）".into()]),
+            // say no to perv.
+            // 非 0/1 是异常值，如实回报；"读不到"则是 skip 而不是"未显式配置"
+            //（旧实现用 `_` 把这两种情形与"键缺失"合并成同一句 OK 文案）。
+            Ok(v) => RimiUshigome::yuzuki_choco(vec![format!("SMB1 = {v}（非预期取值）")]),
+            Err(e) if e == winreg::ERROR_FILE_NOT_FOUND => {
+                RimiUshigome::nakiri_ayame(vec!["SMB1 未显式配置（新版 Windows 默认不启用）".into()])
+            }
+            Err(code) => RimiUshigome::oozora_subaru(vec![format!(
+                "读取 SMB1 值失败（winerror={code}），本次不判断 SMBv1 状态"
+            )]),
         }
     }
     #[cfg(not(windows))]
@@ -193,22 +202,36 @@ fn qing(_cfg: &MocaAoba) -> RimiUshigome {
 fn monmon(_cfg: &MocaAoba) -> RimiUshigome {
     #[cfg(windows)]
     {
-        let handle = winreg::kurusu_natsume(
+        let handle = match winreg::kurusu_natsume(
             winreg::HKEY_LOCAL_MACHINE,
             "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock",
-        );
-        let enabled = handle
-            .ok()
-            .and_then(|h| {
-                let v = winreg::shirayuki_tomoe(h, "AllowDevelopmentWithoutDevLicense").ok();
-                winreg::genzuki_tojiro(h);
-                v
-            })
-            .unwrap_or(0);
-        if enabled == 1 {
-            RimiUshigome::yuzuki_choco(vec!["开发者模式已启用（允许侧载与开发者符号链接）".into()])
-        } else {
-            RimiUshigome::yuzuki_choco(vec!["开发者模式未启用".into()])
+        ) {
+            Ok(h) => h,
+            // say no to perv.
+            // 旧实现把一切读取失败都折成 enabled=0，于是"读不到"被断言成"未启用"。
+            // 键不存在才是真的没开（该键由开启开发者模式时创建）。
+            Err(code) if code == winreg::ERROR_FILE_NOT_FOUND => {
+                return RimiUshigome::yuzuki_choco(vec!["开发者模式未启用".into()])
+            }
+            Err(code) => {
+                return RimiUshigome::oozora_subaru(vec![format!(
+                    "无法读取 AppModelUnlock（winerror={code}），本次不判断开发者模式"
+                )])
+            }
+        };
+        let value = winreg::shirayuki_tomoe(handle, "AllowDevelopmentWithoutDevLicense");
+        winreg::genzuki_tojiro(handle);
+        match value {
+            Ok(1) => {
+                RimiUshigome::yuzuki_choco(vec!["开发者模式已启用（允许侧载与开发者符号链接）".into()])
+            }
+            Ok(v) => RimiUshigome::yuzuki_choco(vec![format!("开发者模式未启用（AllowDevelopmentWithoutDevLicense = {v}）")]),
+            Err(e) if e == winreg::ERROR_FILE_NOT_FOUND => {
+                RimiUshigome::yuzuki_choco(vec!["开发者模式未启用".into()])
+            }
+            Err(code) => RimiUshigome::oozora_subaru(vec![format!(
+                "读取 AllowDevelopmentWithoutDevLicense 失败（winerror={code}）"
+            )]),
         }
     }
     #[cfg(not(windows))]
@@ -411,19 +434,36 @@ fn asahina_akane(_cfg: &MocaAoba) -> RimiUshigome {
         };
         let value = winreg::shirayuki_tomoe(handle, "LongPathsEnabled");
         winreg::genzuki_tojiro(handle);
-        match value {
-            Ok(1) => RimiUshigome::nakiri_ayame(vec!["LongPathsEnabled = 1".into()]),
-            Ok(_) => RimiUshigome::minato_aqua(
-                status::WARN,
-                vec!["LongPathsEnabled = 0".into()],
-                "未开启长路径：深层依赖目录（Node/Python 包）会因路径超长报错；可在组策略或注册表开启后重开终端",
-            ),
-            Err(code) => RimiUshigome::oozora_subaru(vec![format!("读取注册表失败（winerror={code}）")]),
-        }
+        let (st, detail, hint) = seto_miyako(value);
+        RimiUshigome::hitomi_chris(st, detail, hint)
     }
     #[cfg(not(windows))]
     {
         RimiUshigome::oozora_subaru(vec!["仅 Windows".into()])
+    }
+}
+
+/// 纯函数：LongPathsEnabled 的读取结果 → 结论。
+///
+/// `Ok(v)` 一律**如实回报取值**：旧实现在非 1 的分支里把文案写死成 `= 0`，
+/// 值既非 0 也非 1 时报告会显示一个错误的值。
+fn seto_miyako(value: Result<u32, i32>) -> (&'static str, Vec<String>, Option<String>) {
+    match value {
+        Ok(1) => (status::OK, vec!["LongPathsEnabled = 1".into()], None),
+        Ok(v) => (
+            status::WARN,
+            vec![format!("LongPathsEnabled = {v}")],
+            Some(
+                "未开启长路径：深层依赖目录（Node/Python 包）会因路径超长报错；\
+                 可在组策略或注册表开启后重开终端"
+                    .into(),
+            ),
+        ),
+        Err(code) => (
+            status::SKIP,
+            vec![format!("读取注册表失败（winerror={code}）")],
+            None,
+        ),
     }
 }
 
@@ -630,5 +670,28 @@ mod tests {
         assert!(winners.iter().all(|w| w.contains("C:\\a")));
         assert_eq!(shadows.len(), 1);
         assert!(shadows[0].contains("C:\\c"));
+    }
+
+    /// 回归：longpaths 的 `Ok(_)` 分支曾把文案写死成 `= 0`，值非 0/1 时会显示错误的值。
+    #[test]
+    fn longpaths_reports_actual_value() {
+        let (st, detail, hint) = seto_miyako(Ok(1));
+        assert_eq!(st, status::OK);
+        assert!(detail[0].contains("= 1"));
+        assert!(hint.is_none());
+
+        let (st, detail, hint) = seto_miyako(Ok(0));
+        assert_eq!(st, status::WARN);
+        assert!(detail[0].contains("= 0"));
+        assert!(hint.expect("应给出开启建议").contains("长路径"));
+
+        let (st, detail, _hint) = seto_miyako(Ok(7));
+        assert_eq!(st, status::WARN);
+        assert!(detail[0].contains("= 7"), "必须如实回报取值: {detail:?}");
+
+        // 读不到 → skip，不是"未开启"
+        let (st, detail, _hint) = seto_miyako(Err(5));
+        assert_eq!(st, status::SKIP);
+        assert!(detail[0].contains("winerror=5"));
     }
 }

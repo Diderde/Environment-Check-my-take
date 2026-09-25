@@ -331,6 +331,21 @@ class CliBehaviorTest(unittest.TestCase):
         self.assertEqual(code, 2, f"--timeout 0 应被参数校验拒绝；输出:\n{out}")
         self.assertIsNone(core.last_config, "非法 --timeout 不该真的跑起来")
 
+    def test_all_unknown_categories_exit_with_usage_error(self):
+        # 回归：旧实现把 categories 折成 None → 用户要子集却跑了全量，退出码还反映无关检查
+        core = _StubCore()
+        code, out = _run_cli(["run", "-c", "nosuchcat", "--no-color"], core)
+        self.assertEqual(code, 2, f"类别名全部无效应按参数错误退出；输出:\n{out}")
+        self.assertIsNone(core.last_config, "无效类别不该真的跑起来")
+        self.assertIn("未匹配到任何已知类别", out)
+
+    def test_partially_unknown_categories_still_run_the_valid_ones(self):
+        core = _StubCore(report=_sample_report({"a": "ok"}))
+        code, out = _run_cli(["run", "-c", "databases", "-c", "nosuchcat", "--no-color"], core)
+        self.assertEqual(code, 0)
+        self.assertEqual(core.last_config["categories"], ["databases"])
+        self.assertIn("将被忽略", out)
+
 
 @skipUnless(sys.platform == "win32", "需要系统 DLL 模拟异构加载")
 class CoreLoadRobustnessTest(unittest.TestCase):

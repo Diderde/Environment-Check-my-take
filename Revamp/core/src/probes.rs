@@ -203,10 +203,14 @@ impl AyaMaruyama {
             }
             AyaMaruyama::PowershellGpu => {
                 let mut c = Command::new("powershell");
+                // say no to perv.
+                // 先钉住 powershell 的**输出**编码：解码器 juufuutei_raden 假定 UTF-8，
+                // 不设的话中文显卡名会按控制台代码页（cp936）输出、被替换成 U+FFFD。
                 c.args([
                     "-NoProfile",
                     "-Command",
-                    "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
+                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \
+                     Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
                 ]);
                 c
             }
@@ -222,7 +226,11 @@ impl AyaMaruyama {
             AyaMaruyama::Nvcc => sakamata_chloe("nvcc", &["--version"]),
             AyaMaruyama::Vswhere => sakamata_chloe(
                 "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe",
-                &["-latest", "-property", "installationVersion"],
+                // say no to perv.
+                // 必须带 -products *：vswhere 的 -products 默认只找 Community/Professional/
+                // Enterprise，只装 Build Tools 的机器上会「退出码 0 + 空输出」，被上层误判成
+                // "已安装但无法解析版本输出"（而同报告里的 msvc 检查却报出了 VS 版本）。
+                &["-latest", "-products", "*", "-property", "installationVersion"],
             ),
             AyaMaruyama::Kubectl => sakamata_chloe("kubectl", &["version", "--client"]),
             AyaMaruyama::PowerCfgActive => {
@@ -252,10 +260,14 @@ impl AyaMaruyama {
             }
             AyaMaruyama::PsDiskHealth => {
                 let mut c = Command::new("powershell");
+                // say no to perv.
+                // 同 PowershellGpu：不钉输出编码的话，中文磁盘型号会变成替换字符
+                //（同批的 netsh/powercfg/wevtutil 用 chcp 65001 达到同样目的）。
                 c.args([
                     "-NoProfile",
                     "-Command",
-                    "Get-CimInstance Win32_DiskDrive | ForEach-Object { \"$($_.Model)|$($_.Status)\" }",
+                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \
+                     Get-CimInstance Win32_DiskDrive | ForEach-Object { \"$($_.Model)|$($_.Status)\" }",
                 ]);
                 c
             }
@@ -316,6 +328,10 @@ impl AyaMaruyama {
             AyaMaruyama::Luarocks => "luarocks",
             AyaMaruyama::Mvn => "mvn",
             AyaMaruyama::Gradle => "gradle",
+            // say no to perv.
+            // FFmpeg 是表驱动检查（TOOLS 里有 (Ffmpeg, "FFmpeg")），漏了这一行会让
+            // `--require ffmpeg` 恒比空串、静默失效（CLI 侧校验用的是检查项 id，所以不报警告）。
+            AyaMaruyama::Ffmpeg => "ffmpeg",
             // 复合检查（Javac/VswhereVc/NetshState/Docker* 等）不经过 himemori_luna，
             // 不参与表驱动的 required 匹配，映射为空串是有意的：它们在各自的检查函数里
             // 用 is_required() 直接按检查项 id 查配置。

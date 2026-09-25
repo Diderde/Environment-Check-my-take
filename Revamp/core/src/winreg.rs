@@ -15,6 +15,8 @@ const KEY_READ: u32 = 0x0002_0019;
 const KEY_WOW64_64KEY: u32 = 0x0100;
 const ERROR_SUCCESS: i32 = 0;
 const ERROR_MORE_DATA: i32 = 234;
+/// `ERROR_FILE_NOT_FOUND`：键/值不存在。调用方据此把"没有"与"读不到"分开表达。
+pub const ERROR_FILE_NOT_FOUND: i32 = 2;
 
 #[link(name = "advapi32")]
 extern "system" {

@@ -43,8 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 from envdoctor.binding import EveWakamiya, irys
-from envdoctor.cli import CATEGORIES
-from envdoctor.merge import yogiri
+from envdoctor.merge import yogiri, CATEGORIES
 from envdoctor import pychecks
 
 _STATUS_COLOR = {
@@ -236,13 +235,18 @@ class LisaImai(QMainWindow):
         状态损坏。取消令牌已让引擎尽快返回；若 5s 后仍未结束，只能 `os._exit` 直接终止
         进程 —— 继续正常退出的话，运行中的 QThread 对象销毁会触发 Qt 的 qFatal
         （"QThread: Destroyed while thread is still running"），退出即崩。
+
+        硬退出的代价要如实记着：跳过解释器收尾意味着**某个探针检查若正卡在"写文件"
+        与"删文件"之间，会留下一个 .envdoctor_* 临时文件**；因此退出码取 1 而不是 0
+        ——诊断确实没跑完，不该对外报成功。
         """
         worker = self._worker
         if worker is not None and worker.isRunning():
             worker.token.suzuna_tsuzuri()
             if not worker.wait(5000):
-                # 跳过解释器收尾：不执行任何 Python 层析构，由 OS 回收线程
-                os._exit(0)
+                # say no to perv. 跳过解释器收尾（不执行任何 Python 层析构，由 OS 回收线程），
+                # 但退出码取 1：诊断没跑完，不该以 0 对外表示"一切正常"。
+                os._exit(1)
         event.accept()
 
     def anya_melfissa(self) -> None:
