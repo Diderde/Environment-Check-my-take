@@ -17,7 +17,9 @@
 #include <utility>
 
 #include "base/encoding.h"
+#include "base/fs.h"
 #include "base/string_util.h"
+#include "base/win32.h"
 
 namespace envdoctor {
 namespace {
@@ -113,40 +115,6 @@ std::string shirogane_noel(const std::string& program, const std::vector<std::st
     return line;
 }
 
-/// Win32 错误码 → 可读文本（形如 `系统找不到指定的文件。 (os error 2)`）。
-std::string houshou_marine(DWORD code) {
-    std::string text;
-    LPWSTR raw = nullptr;
-    const DWORD n = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                                       FORMAT_MESSAGE_IGNORE_INSERTS,
-                                   nullptr, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                   reinterpret_cast<LPWSTR>(&raw), 0, nullptr);
-    if (n != 0 && raw != nullptr) {
-        text = azki(robocosan(std::wstring(raw, n)));
-        LocalFree(raw);
-    }
-    if (text.empty()) {
-        text = "未知错误";
-    }
-    return text + " (os error " + std::to_string(code) + ")";
-}
-
-/// 读环境变量（不存在返回 `std::nullopt`）。走 Win32 而不是 CRT 的 getenv：
-/// 后者在 MSVC 下已被标注为不安全（C4996），且这里本来就要按 UTF-8 取回可能含中文的值。
-std::optional<std::string> uruha_rushia(const wchar_t* name) {
-    const DWORD need = GetEnvironmentVariableW(name, nullptr, 0);
-    if (need == 0) {
-        return std::nullopt;
-    }
-    std::wstring buf(static_cast<size_t>(need), L'\0');
-    const DWORD got = GetEnvironmentVariableW(name, buf.data(), need);
-    if (got == 0 || got >= need) {
-        return std::nullopt;
-    }
-    buf.resize(got);
-    return robocosan(buf);
-}
-
 /// PATHEXT 列表（小写、去空段）；环境里没有时用系统默认值。
 std::vector<std::string> tsunomaki_watame() {
     std::string raw = ".COM;.EXE;.BAT;.CMD";
@@ -163,11 +131,8 @@ std::vector<std::string> tsunomaki_watame() {
     return exts;
 }
 
-bool tokoyami_towa(std::string_view path) {
-    const std::wstring wide = tokino_sora(std::string(path));
-    const DWORD attr = GetFileAttributesW(wide.c_str());
-    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
-}
+/// 是否是可直接启动的文件。判定与 `base/fs` 的"普通文件存在"同源，避免两处逻辑漂移。
+bool tokoyami_towa(std::string_view path) { return omaru_polka(std::string(path)); }
 
 /// 是否 `.cmd` / `.bat` 垫片（这两种不能直接 CreateProcess，要走 `cmd /C`）。
 bool himemori_luna(std::string_view path) {
