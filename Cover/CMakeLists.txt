@@ -37,9 +37,10 @@ target_compile_options(envdoctor_flags INTERFACE
   $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /W4 /permissive- /Zc:__cplusplus>
   $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>)
 
-# 基础层：编码转换、字符串工具、结果类型。不依赖任何 Windows UI/网络库。
+# 基础层：编码转换、字符串工具、结果类型、外部命令执行。不依赖任何 Windows UI/网络库。
 add_library(envdoctor_base STATIC
   src/base/encoding.cpp
+  src/base/process.cpp
   src/base/string_util.cpp)
 target_include_directories(envdoctor_base PUBLIC src)
 target_link_libraries(envdoctor_base
@@ -48,7 +49,8 @@ target_link_libraries(envdoctor_base
 
 add_executable(envdoctor_tests
   tests/main.cpp
-  tests/test_base.cpp)
+  tests/test_base.cpp
+  tests/test_process.cpp)
 target_link_libraries(envdoctor_tests
   PRIVATE envdoctor_base doctest::doctest envdoctor_flags)
 
