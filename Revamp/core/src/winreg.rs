@@ -10,6 +10,7 @@
 //! - 字符串值按 UTF-16 解码（注册表原生即 UTF-16，无代码页问题）。
 
 pub const HKEY_LOCAL_MACHINE: isize = 0x8000_0002u32 as isize;
+pub const HKEY_CURRENT_USER: isize = 0x8000_0001u32 as isize;
 const KEY_READ: u32 = 0x0002_0019;
 const KEY_WOW64_64KEY: u32 = 0x0100;
 const ERROR_SUCCESS: i32 = 0;
@@ -136,9 +137,16 @@ pub fn fuwa_minato(handle: isize, name: &str) -> Result<String, i32> {
     Ok(utf16_to_string(&pairs))
 }
 
-/// 键是否存在。
+/// 键是否存在。存在性探测的句柄**必须在函数内就地关闭**：本函数被 reboot_pending /
+/// secureboot 等检查高频调用，把句柄丢给调用方等于每次调用泄漏一个句柄（实测 +1/次）。
 pub fn hoshikawa_sara(root: isize, path: &str) -> bool {
-    kurusu_natsume(root, path).is_ok()
+    match kurusu_natsume(root, path) {
+        Ok(h) => {
+            genzuki_tojiro(h);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 /// 键下的某个值是否存在（不关心内容）。
@@ -189,8 +197,6 @@ pub fn siddel(handle: isize, name: &str) -> Result<Vec<String>, i32> {
 
 /// 枚举子键名（Defender 排除路径等场景：子键名本身就是数据）。
 pub fn yamagami_karuta(handle: isize) -> Vec<String> {
-    let mut info_class = [0u16; 256];
-    let mut info_class_len = info_class.len() as u32;
     let mut subkeys = 0u32;
     let mut max_subkey = 0u32;
     let mut max_class = 0u32;
@@ -199,11 +205,13 @@ pub fn yamagami_karuta(handle: isize) -> Vec<String> {
     let mut max_value_data = 0u32;
     let mut sd = 0u32;
     let mut last_write = 0u64;
+    // lpClass 一律传 NULL：本函数只需要子键名，class 缓冲固定 256 wchar 会在
+    // 超长 class 时让整个查询返回 ERROR_MORE_DATA、把结果误判成空表。
     let ok = unsafe {
         RegQueryInfoKeyW(
             handle,
-            info_class.as_mut_ptr(),
-            &mut info_class_len,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
             std::ptr::null_mut(),
             &mut subkeys,
             &mut max_subkey,

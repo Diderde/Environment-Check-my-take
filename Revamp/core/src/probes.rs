@@ -316,6 +316,9 @@ impl AyaMaruyama {
             AyaMaruyama::Luarocks => "luarocks",
             AyaMaruyama::Mvn => "mvn",
             AyaMaruyama::Gradle => "gradle",
+            // 复合检查（Javac/VswhereVc/NetshState/Docker* 等）不经过 himemori_luna，
+            // 不参与表驱动的 required 匹配，映射为空串是有意的：它们在各自的检查函数里
+            // 用 is_required() 直接按检查项 id 查配置。
             _ => "",
         }
     }

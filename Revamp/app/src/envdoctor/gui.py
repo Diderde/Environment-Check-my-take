@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 from envdoctor.binding import EveWakamiya, irys
+from envdoctor.cli import CATEGORIES
 from envdoctor.merge import yogiri
 from envdoctor import pychecks
 
@@ -350,7 +351,10 @@ class LisaImai(QMainWindow):
         for r in report["results"]:
             by_cat.setdefault(r["category"], []).append(r)
 
-        for cat in sorted(by_cat):
+        # 类别顺序与 CLI 的固定 CATEGORIES 一致（fail/warn 常发的类别排前），
+        # 未登记的类别（防御性）按字典序缀在后面
+        order = {c: i for i, c in enumerate(CATEGORIES)}
+        for cat in sorted(by_cat, key=lambda c: (order.get(c, len(order)), c)):
             rows = by_cat[cat]
             counts: dict[str, int] = {}
             for r in rows:

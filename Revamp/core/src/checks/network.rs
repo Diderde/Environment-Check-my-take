@@ -333,13 +333,23 @@ fn usada_pekora(_cfg: &MocaAoba) -> RimiUshigome {
 
 fn shiranui_flare(_cfg: &MocaAoba) -> RimiUshigome {
     let mut detail = Vec::new();
+    let mut unreachable = 0usize;
     for (name, host) in [("清华源", "pypi.tuna.tsinghua.edu.cn"), ("阿里源", "mirrors.aliyun.com")] {
         match higuchi_kaede(host, 443, Duration::from_secs(4)) {
             Ok(ms) => detail.push(format!("{name} {host}:443 可达（{ms:.0}ms）")),
-            Err(e) => detail.push(format!("{name} 不可达：{e}")),
+            Err(e) => {
+                unreachable += 1;
+                detail.push(format!("{name} 不可达：{e}"));
+            }
         }
     }
-    RimiUshigome::nakiri_ayame(detail)
+    // 镜像不可达不算病（直连官方源可用即可），但若仍记 ok，摘要行的 ✅ 会与
+    // 明细里的"不可达"自相矛盾 —— 有不可达时降为 info。
+    if unreachable > 0 {
+        RimiUshigome::yuzuki_choco(detail)
+    } else {
+        RimiUshigome::nakiri_ayame(detail)
+    }
 }
 
 fn shirogane_noel(url: &str) -> String {

@@ -13,7 +13,9 @@ use crate::winreg;
 pub fn tokino_sora() -> Vec<SaayaYamabuki> {
     vec![
         SaayaYamabuki { id: "env.path_validity", title: "PATH 有效性", category: "env", platforms: &[], func: todo_kohaku },
-        SaayaYamabuki { id: "env.path_shadowing", title: "PATH 遮蔽", category: "env", platforms: &[], func: lain_paterson },
+        // 监视名单与路径拼接（{dir}\{name}.exe）都是 Windows 形态：不限平台会在
+        // POSIX 上恒报"无遮蔽"（假阴性），故显式限定。
+        SaayaYamabuki { id: "env.path_shadowing", title: "PATH 遮蔽", category: "env", platforms: &["windows"], func: lain_paterson },
         SaayaYamabuki { id: "env.longpaths", title: "长路径支持", category: "env", platforms: &["windows"], func: asahina_akane },
         SaayaYamabuki { id: "env.reboot_pending", title: "待重启状态", category: "env", platforms: &["windows"], func: lauren_iroas },
         SaayaYamabuki { id: "env.vcredist", title: "VC++ 运行库", category: "env", platforms: &["windows"], func: leos_vincent },
@@ -599,7 +601,7 @@ mod tests {
 
     #[test]
     fn reboot_verdict_maps_hits() {
-        let (st, detail, hint) = lauren_iroas_verdict([false, false, false]);
+        let (st, _detail, hint) = lauren_iroas_verdict([false, false, false]);
         assert_eq!(st, status::OK);
         assert!(hint.is_none());
         let (st, detail, hint) = lauren_iroas_verdict([true, false, false]);

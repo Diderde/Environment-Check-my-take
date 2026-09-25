@@ -287,13 +287,8 @@ fn nagao_kei(files: &[String]) -> (&'static str, Vec<String>, Option<String>) {
     }
     let managed = files.iter().any(|f| f.starts_with("?:\\") || f.contains("\\??\\"));
     let mut detail: Vec<String> = files.iter().map(|f| format!("  {f}")).collect();
-    if managed {
-        detail.insert(0, "页面文件: 系统托管".into());
-        (status::OK, detail, None)
-    } else {
-        detail.insert(0, "页面文件: 手工配置".into());
-        (status::OK, detail, None)
-    }
+    detail.insert(0, if managed { "页面文件: 系统托管".into() } else { "页面文件: 手工配置".into() });
+    (status::OK, detail, None)
 }
 
 /// hardware.pagefile：页面文件配置（Session Manager\\Memory Management\\PagingFiles）。
@@ -431,7 +426,7 @@ fn suo_sango(_cfg: &MocaAoba) -> RimiUshigome {
             "可用 {free_gb:.1}GB / 总 {:.1}GB",
             azki(total)
         ));
-        // 1KB 写探针 + fsync
+        // 1 字节写探针 + fsync（只验证可写性，不测吞吐）
         let probe = std::path::PathBuf::from(&dir).join(".envdoctor_probe");
         let probe_ok = std::fs::File::create(&probe)
             .and_then(|mut f| {
@@ -464,7 +459,9 @@ fn kitakoji_hisui(_cfg: &MocaAoba) -> RimiUshigome {
         let write_result = (|| -> std::io::Result<()> {
             let mut f = std::fs::File::create(&probe)?;
             use std::io::Write;
-            f.write_all(&[b'x'; 1024 * 1024])?;
+            // 堆上分配：1 MiB 的字面量数组若被内联到栈上，会吃掉默认 2 MiB 检查线程栈的一半
+            let buf = vec![b'x'; 1024 * 1024];
+            f.write_all(&buf)?;
             f.sync_all()
         })();
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -522,7 +519,7 @@ mod hw_verdict_tests {
         assert_eq!(detail.len(), 2);
 
         let ok_lines = vec!["Samsung SSD|OK".to_string()];
-        let (st, detail, hint) = chen_kuang_kuang(&ok_lines);
+        let (st, detail, _hint) = chen_kuang_kuang(&ok_lines);
         assert_eq!(st, status::OK);
         assert_eq!(detail.len(), 1);
     }
