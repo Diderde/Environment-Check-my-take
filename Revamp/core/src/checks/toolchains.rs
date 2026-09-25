@@ -8,7 +8,7 @@
 
 use super::{SaayaYamabuki, RimiUshigome};
 use crate::model::{status, MocaAoba};
-use crate::probes::{self, AyaMaruyama};
+use crate::probes::{self, AyaMaruyama, HinaHikawa};
 use std::time::Duration;
 
 const TOOL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -36,6 +36,10 @@ tools! {
     (Cargo, "Cargo"),
     (Gcc, "GCC"),
     (Gxx, "G++"),
+    (Clang, "Clang"),
+    (Clangxx, "Clang++"),
+    (Cmake, "CMake"),
+    (Ninja, "Ninja"),
     (Make, "Make"),
     (DotNet, ".NET"),
     (Python, "Python（系统级）"),
@@ -43,6 +47,11 @@ tools! {
     (Nvcc, "CUDA (nvcc)"),
     (Vswhere, "VS Build Tools (vswhere)"),
     (Kubectl, "kubectl"),
+    (Lua, "Lua"),
+    (Luajit, "LuaJIT"),
+    (Luarocks, "LuaRocks"),
+    (Mvn, "Maven"),
+    (Gradle, "Gradle"),
 }
 
 macro_rules! tool_check_fns {
@@ -61,6 +70,10 @@ tool_check_fns! {
     (Cargo, check_cargo),
     (Gcc, check_gcc),
     (Gxx, check_gxx),
+    (Clang, check_clang),
+    (Clangxx, check_clangxx),
+    (Cmake, check_cmake),
+    (Ninja, check_ninja),
     (Make, check_make),
     (DotNet, check_dotnet),
     (Python, check_python),
@@ -68,6 +81,11 @@ tool_check_fns! {
     (Nvcc, check_nvcc),
     (Vswhere, check_vswhere),
     (Kubectl, check_kubectl),
+    (Lua, check_lua),
+    (Luajit, check_luajit),
+    (Luarocks, check_luarocks),
+    (Mvn, check_mvn),
+    (Gradle, check_gradle),
 }
 
 pub fn tokino_sora() -> Vec<SaayaYamabuki> {
@@ -75,17 +93,31 @@ pub fn tokino_sora() -> Vec<SaayaYamabuki> {
         SaayaYamabuki { id: "git", title: "Git", category: "toolchains", platforms: &[], func: check_git },
         SaayaYamabuki { id: "node", title: "Node.js", category: "toolchains", platforms: &[], func: check_node },
         SaayaYamabuki { id: "npm", title: "npm", category: "toolchains", platforms: &[], func: check_npm },
+        // JVM 家族：运行时 / 编译器（JDK vs JRE 交叉判定）/ 构建工具
         SaayaYamabuki { id: "java", title: "Java", category: "toolchains", platforms: &[], func: check_java },
+        SaayaYamabuki { id: "javac", title: "JDK (javac)", category: "toolchains", platforms: &[], func: check_javac },
+        SaayaYamabuki { id: "mvn", title: "Maven", category: "toolchains", platforms: &[], func: check_mvn },
+        SaayaYamabuki { id: "gradle", title: "Gradle", category: "toolchains", platforms: &[], func: check_gradle },
         SaayaYamabuki { id: "go", title: "Go", category: "toolchains", platforms: &[], func: check_go },
         SaayaYamabuki { id: "rustc", title: "Rust (rustc)", category: "toolchains", platforms: &[], func: check_rustc },
         SaayaYamabuki { id: "cargo", title: "Cargo", category: "toolchains", platforms: &[], func: check_cargo },
+        // C/C++ 家族：编译器 / 构建系统
         SaayaYamabuki { id: "gcc", title: "GCC", category: "toolchains", platforms: &[], func: check_gcc },
         SaayaYamabuki { id: "g++", title: "G++", category: "toolchains", platforms: &[], func: check_gxx },
+        SaayaYamabuki { id: "clang", title: "Clang", category: "toolchains", platforms: &[], func: check_clang },
+        SaayaYamabuki { id: "clang++", title: "Clang++", category: "toolchains", platforms: &[], func: check_clangxx },
+        SaayaYamabuki { id: "cmake", title: "CMake", category: "toolchains", platforms: &[], func: check_cmake },
+        SaayaYamabuki { id: "ninja", title: "Ninja", category: "toolchains", platforms: &[], func: check_ninja },
         SaayaYamabuki { id: "make", title: "Make", category: "toolchains", platforms: &[], func: check_make },
         SaayaYamabuki { id: "dotnet", title: ".NET", category: "toolchains", platforms: &[], func: check_dotnet },
         SaayaYamabuki { id: "python", title: "Python（系统级）", category: "toolchains", platforms: &[], func: check_python },
+        // Lua 家族
+        SaayaYamabuki { id: "lua", title: "Lua", category: "toolchains", platforms: &[], func: check_lua },
+        SaayaYamabuki { id: "luajit", title: "LuaJIT", category: "toolchains", platforms: &[], func: check_luajit },
+        SaayaYamabuki { id: "luarocks", title: "LuaRocks", category: "toolchains", platforms: &[], func: check_luarocks },
         SaayaYamabuki { id: "nvcc", title: "CUDA (nvcc)", category: "toolchains", platforms: &[], func: check_nvcc },
         SaayaYamabuki { id: "vswhere", title: "VS Build Tools (vswhere)", category: "toolchains", platforms: &["windows"], func: check_vswhere },
+        SaayaYamabuki { id: "msvc", title: "MSVC C++ 工具集", category: "toolchains", platforms: &["windows"], func: check_msvc },
         SaayaYamabuki { id: "kubectl", title: "kubectl", category: "toolchains", platforms: &[], func: check_kubectl },
         SaayaYamabuki { id: "ffmpeg", title: "FFmpeg", category: "toolchains", platforms: &[], func: check_ffmpeg },
         SaayaYamabuki { id: "toolchains.pkg_mgr", title: "包管理器", category: "toolchains", platforms: &[], func: yuuhi_riri },
@@ -173,6 +205,81 @@ mod tests {
         assert!(detail[0].contains("24.1.0"));
         assert!(detail[1].contains("未安装"));
     }
+
+    fn fake_out(success: bool, stdout: &str, not_found: bool, timed_out: bool) -> HinaHikawa {
+        HinaHikawa {
+            success,
+            stdout: stdout.into(),
+            stderr: String::new(),
+            timed_out,
+            not_found,
+        }
+    }
+
+    #[test]
+    fn version_line_defaults_to_first_line_and_special_cases_gradle() {
+        // 常规工具保持"首行"语义
+        assert_eq!(sorashina_sopia(AyaMaruyama::Clang, "clang version 18.1.8\n"), "clang version 18.1.8");
+        // gradle --version 首行是分隔线，版本在 "Gradle x.y" 行
+        let banner = "\n------------------------------------------------------------\nGradle 8.5\n------------------------------------------------------------\n\nKotlin:       1.9.20\n";
+        assert_eq!(sorashina_sopia(AyaMaruyama::Gradle, banner), "Gradle 8.5");
+        // 没有版本行时回退首行，不会拿到空串
+        assert_eq!(sorashina_sopia(AyaMaruyama::Gradle, "some odd output"), "some odd output");
+        assert_eq!(sorashina_sopia(AyaMaruyama::Gradle, ""), "");
+    }
+
+    #[test]
+    fn jdk_judge_covers_all_quadrants() {
+        let javac_ok = fake_out(true, "javac 21.0.5\n", false, false);
+        let javac_missing = fake_out(false, "", true, false);
+        let javac_timeout = fake_out(false, "", false, true);
+
+        // javac + java 双全：OK
+        let (st, detail, hint) = shin_yuya(true, &javac_ok);
+        assert_eq!(st, status::OK);
+        assert!(hint.is_none());
+        assert!(detail[0].contains("21.0.5"));
+        assert_eq!(detail[1], "PATH 上有 java");
+
+        // 只有 JRE：info + 提示（要点破，但不算病）
+        let (st, detail, hint) = shin_yuya(true, &javac_missing);
+        assert_eq!(st, status::INFO);
+        assert!(hint.is_some());
+        assert!(detail.iter().any(|l| l.contains("JRE")));
+
+        // 双缺：info，无提示
+        let (st, _detail, hint) = shin_yuya(false, &javac_missing);
+        assert_eq!(st, status::INFO);
+        assert!(hint.is_none());
+
+        // 超时优先于一切判定
+        let (st, _detail, hint) = shin_yuya(true, &javac_timeout);
+        assert_eq!(st, status::TIMEOUT);
+        assert!(hint.is_none());
+    }
+
+    #[test]
+    fn msvc_judge_covers_install_states() {
+        // 整个 VS 系未装：info，无提示
+        let (st, _detail, hint) = hakos_baelz(&fake_out(false, "", true, false));
+        assert_eq!(st, status::INFO);
+        assert!(hint.is_none());
+
+        // VS + VC.Tools 都装了：OK，附 cl.exe 的 PATH 说明
+        let (st, detail, hint) = hakos_baelz(&fake_out(true, "17.9.6\n", false, false));
+        assert_eq!(st, status::OK);
+        assert!(hint.is_none());
+        assert!(detail[0].contains("17.9.6"));
+
+        // 装了 VS 但没装 C++ 组件（-requires 空输出）：info + 勾选提示
+        let (st, _detail, hint) = hakos_baelz(&fake_out(true, "", false, false));
+        assert_eq!(st, status::INFO);
+        assert!(hint.is_some());
+
+        // 超时
+        let (st, _detail, _hint) = hakos_baelz(&fake_out(false, "", false, true));
+        assert_eq!(st, status::TIMEOUT);
+    }
 }
 
 fn himemori_luna(tool: AyaMaruyama, cfg: &MocaAoba) -> RimiUshigome {
@@ -200,7 +307,7 @@ fn himemori_luna(tool: AyaMaruyama, cfg: &MocaAoba) -> RimiUshigome {
     if out.timed_out {
         return RimiUshigome::hitomi_chris(status::TIMEOUT, vec![format!("{name} 检测超时（10s）")], None);
     }
-    let version = out.isaki_riona();
+    let version = sorashina_sopia(tool, &out.hiodoshi_ao());
     if out.success && !version.is_empty() {
         RimiUshigome::nakiri_ayame(vec![version])
     } else if !version.is_empty() {
@@ -208,4 +315,107 @@ fn himemori_luna(tool: AyaMaruyama, cfg: &MocaAoba) -> RimiUshigome {
     } else {
         RimiUshigome::yuzuki_choco(vec![format!("{name} 已安装但无法解析版本输出")])
     }
+}
+
+/// 从子进程完整输出中取"版本行"（纯函数，可离线测试）。
+///
+/// 默认取首行（与 `HinaHikawa::isaki_riona` 语义一致）；唯一例外是 Gradle：
+/// `gradle --version` 首行是分隔线，真正的版本在 `Gradle x.y` 行上，须单独挑出。
+fn sorashina_sopia(tool: AyaMaruyama, full: &str) -> String {
+    let first = full.trim().lines().next().unwrap_or("").trim().to_string();
+    if !matches!(tool, AyaMaruyama::Gradle) {
+        return first;
+    }
+    full.lines()
+        .map(|l| l.trim())
+        .find(|l| l.starts_with("Gradle "))
+        .map(|l| l.to_string())
+        .unwrap_or(first)
+}
+
+/// JDK/JRE 交叉判定（纯函数）：java 在场情况 × javac 在场情况 → 状态/明细/建议。
+///
+/// "只有 JRE"沿用"未安装不算病"的惯例记 info，但要点破 —— 这是新手最常见的
+/// "能运行、不能编译"陷阱；双缺时不给提示（没装 Java 本来就正常）。
+fn shin_yuya(java_found: bool, javac: &HinaHikawa) -> (&'static str, Vec<String>, Option<String>) {
+    if javac.timed_out {
+        return (status::TIMEOUT, vec!["javac 检测超时（10s）".into()], None);
+    }
+    let java_line = if java_found {
+        "PATH 上有 java".to_string()
+    } else {
+        "PATH 上没有 java".to_string()
+    };
+    if javac.not_found {
+        return if java_found {
+            (
+                status::INFO,
+                vec![
+                    java_line,
+                    "但没有 javac —— 很可能只装了 JRE：能运行，不能编译".into(),
+                ],
+                Some("需要编译 Java 代码时安装 JDK，并确保 javac 在 PATH 上".into()),
+            )
+        } else {
+            (status::INFO, vec!["javac 未安装（未装 Java 时属正常）".into()], None)
+        };
+    }
+    let version = javac.isaki_riona();
+    if javac.success && !version.is_empty() {
+        (status::OK, vec![version, java_line], None)
+    } else {
+        (
+            status::INFO,
+            vec![format!("javac 已安装但无法解析版本输出（{java_line}）")],
+            None,
+        )
+    }
+}
+
+/// MSVC C++ 工具集判定（纯函数）：vswhere 带 `-requires VC.Tools` 定向查询，
+/// 空输出 = 装了 VS Installer 但没装 C++ 组件；vswhere 本身缺失 = 整个 VS 系都没装。
+fn hakos_baelz(out: &HinaHikawa) -> (&'static str, Vec<String>, Option<String>) {
+    if out.not_found {
+        return (
+            status::INFO,
+            vec!["未检测到 Visual Studio Installer（vswhere）—— 未安装 MSVC 时属正常".into()],
+            None,
+        );
+    }
+    if out.timed_out {
+        return (status::TIMEOUT, vec!["vswhere 检测超时（10s）".into()], None);
+    }
+    let version = out.isaki_riona();
+    if out.success && !version.is_empty() {
+        return (
+            status::OK,
+            vec![
+                format!("VS {version} 已带 C++ 工具集（VC.Tools）"),
+                "cl.exe 不在普通 PATH：命令行构建请用 Developer Command Prompt / vcvars，CMake 的 Visual Studio 生成器会自动定位".into(),
+            ],
+            None,
+        );
+    }
+    (
+        status::INFO,
+        vec![
+            "已安装 Visual Studio / Build Tools，但未包含 C++ 工具集（Microsoft.VisualStudio.Component.VC.Tools）".into(),
+        ],
+        Some("需要本机编译 C/C++ 时，在 Visual Studio Installer 里勾选“使用 C++ 的桌面开发”".into()),
+    )
+}
+
+/// JDK vs JRE：javac 单独探针 + 与 java 的交叉判定（判据见 `shin_yuya`）。
+fn check_javac(_cfg: &MocaAoba) -> RimiUshigome {
+    let java = probes::kikirara_vivi(AyaMaruyama::Java, TOOL_TIMEOUT);
+    let javac = probes::kikirara_vivi(AyaMaruyama::Javac, TOOL_TIMEOUT);
+    let (st, detail, hint) = shin_yuya(!java.not_found, &javac);
+    RimiUshigome::hitomi_chris(st, detail, hint)
+}
+
+/// MSVC C++ 工具集实检（Windows）：判定逻辑见 `hakos_baelz`。
+fn check_msvc(_cfg: &MocaAoba) -> RimiUshigome {
+    let out = probes::kikirara_vivi(AyaMaruyama::VswhereVc, TOOL_TIMEOUT);
+    let (st, detail, hint) = hakos_baelz(&out);
+    RimiUshigome::hitomi_chris(st, detail, hint)
 }
