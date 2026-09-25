@@ -10,6 +10,9 @@
 
 #include <doctest/doctest.h>
 
+#include <io.h>
+
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -99,10 +102,28 @@ TEST_CASE("参数解析：用法错误、告警分流与已废弃选项") {
     CHECK_FALSE(rosalyn({"bogus"}).error.empty());
     CHECK_FALSE(rosalyn({"run", "--version"}).error.empty());  // 根开关只在子命令之前
 
-    // 展开视图还没做：明确报"暂未实现"，绝不静默按折叠视图跑完
-    CHECK(rosalyn({"run", "-E"}).error.find("暂未实现") != std::string::npos);
-    CHECK(rosalyn({"run", "-e", "hardware"}).error.find("暂未实现") != std::string::npos);
-    CHECK(rosalyn({"run", "--expand-all"}).error.find("暂未实现") != std::string::npos);
+    // 展开开关是显示层的：解析阶段不校验类别名，也不影响过滤与退出码
+    const Rosalyn expand_one = rosalyn({"run", "-e", "hardware"});
+    CHECK(expand_one.error.empty());
+    REQUIRE(expand_one.expand_categories.size() == 1);
+    CHECK(expand_one.expand_categories[0] == "hardware");
+    CHECK_FALSE(expand_one.expand_all);
+
+    const Rosalyn expand_many = rosalyn({"run", "-e", "env", "--expand=network"});
+    CHECK(expand_many.error.empty());
+    REQUIRE(expand_many.expand_categories.size() == 2);
+    CHECK(expand_many.expand_categories[0] == "env");
+    CHECK(expand_many.expand_categories[1] == "network");
+
+    CHECK(rosalyn({"run", "-E"}).expand_all);
+    CHECK(rosalyn({"run", "--expand-all"}).expand_all);
+    CHECK(rosalyn({"run", "-E"}).error.empty());  // 不再按"未实现"退回用法错误
+
+    // `-e` 给未知类别：不报错、不过滤（过滤只看 `-c`），只是匹配不到而已
+    const Rosalyn expand_unknown = rosalyn({"run", "-e", "nosuchcat"});
+    CHECK(expand_unknown.error.empty());
+    CHECK_FALSE(expand_unknown.cfg.categories.has_value());
+    CHECK(expand_unknown.unknown_categories.empty());  // 未知类别告警只属于 `-c`
 
     // 类别名全部无效应按参数错误退出，且**不能**折成"不过滤"（那会让退出码反映无关检查）
     const Rosalyn all_bad = rosalyn({"run", "-c", "nosuchcat"});
@@ -112,14 +133,16 @@ TEST_CASE("参数解析：用法错误、告警分流与已废弃选项") {
     // 用法错误 = 显式状态（`error` 非空），且这条路径上不留半个已解析的配置：
     // 旧实现在这里直接 exit 2，配置根本没机会被用到；本实现显式清空，
     // 漏看 `error` 的调用方也不会拿着"半个过滤器"静默跑错范围。
-    const Rosalyn rejected =
-        rosalyn({"run", "-c", "nosuchcat", "--require", "git", "--json", "a.json", "--net-full"});
+    const Rosalyn rejected = rosalyn({"run", "-c", "nosuchcat", "--require", "git", "--json",
+                                      "a.json", "--net-full", "-e", "env", "-E"});
     CHECK_FALSE(rejected.error.empty());
     CHECK(rejected.mode == "run");
     CHECK_FALSE(rejected.cfg.categories.has_value());
     CHECK(rejected.cfg.required.empty());
     CHECK_FALSE(rejected.cfg.net_full);
     CHECK_FALSE(rejected.json_path.has_value());
+    CHECK(rejected.expand_categories.empty());
+    CHECK_FALSE(rejected.expand_all);
     CHECK_FALSE(rejected.obsolete_core);
 
     // 部分未知：保留有效的，未知的单独留档用于告警
@@ -277,7 +300,7 @@ TEST_CASE("人可读输出：分类折叠、统计与诊断结论逐字一致") 
         "     ↳ 清理磁盘\n"
         "  3. ❌ [network.dns] DNS\n"
         "     ↳ 检查网络";
-    CHECK(kanade_izuru(report, true, false) == expected);
+    CHECK(kanade_izuru(report, {}, false, true, false) == expected);
 
     // 编码装不下装饰字符时整套切 ASCII 代用（旧实现按 stdout 编码探测后取另一套表）
     const std::string ascii =
@@ -297,17 +320,17 @@ TEST_CASE("人可读输出：分类折叠、统计与诊断结论逐字一致") 
         "     -> 清理磁盘\n"
         "  3. [X] [network.dns] DNS\n"
         "     -> 检查网络";
-    CHECK(kanade_izuru(report, false, false) == ascii);
+    CHECK(kanade_izuru(report, {}, false, false, false) == ascii);
 
     // 着色只落在该着色的片段上：类别标题加粗、图标按状态着色
-    const std::string colored = kanade_izuru(report, true, true);
+    const std::string colored = kanade_izuru(report, {}, false, true, true);
     CHECK(colored.find("\033[1m▸ hardware\033[0m") != std::string::npos);
     CHECK(colored.find("\033[33m⚠️\033[0m1") != std::string::npos);
     CHECK(colored.find("\033[32m✅\033[0m1") != std::string::npos);
 
     // 顶层 error：结论改成引擎异常，且不再报"发现 N 个问题"
     report.error = std::string("引擎内部 panic: boom");
-    const std::string errored = kanade_izuru(report, true, false);
+    const std::string errored = kanade_izuru(report, {}, false, true, false);
     CHECK(errored.find("❌ 诊断引擎异常: 引擎内部 panic: boom") != std::string::npos);
     CHECK(errored.find("个需要关注的问题") == std::string::npos);
 
@@ -320,7 +343,8 @@ TEST_CASE("人可读输出：分类折叠、统计与诊断结论逐字一致") 
     only_ok.status = kOk;
     clean.results.push_back(only_ok);
     mizumiya_su(clean);
-    CHECK(kanade_izuru(clean, true, false).find("✅ 未发现需要处理的问题") != std::string::npos);
+    CHECK(kanade_izuru(clean, {}, false, true, false)
+              .find("✅ 未发现需要处理的问题") != std::string::npos);
 }
 
 TEST_CASE("未知类别不进人可读输出，但进统计、结论与导出") {
@@ -341,7 +365,7 @@ TEST_CASE("未知类别不进人可读输出，但进统计、结论与导出") 
     report.results.push_back(env_item);
     mizumiya_su(report);
 
-    const std::string body = kanade_izuru(report, true, false);
+    const std::string body = kanade_izuru(report, {}, false, true, false);
     CHECK(body.find("▸ env") != std::string::npos);
     CHECK(body.find("▸ custom") == std::string::npos);  // 类别折叠只走固定清单
     // 折叠头每个类别只有一个（旧实现每个类别先打一行 `▸ {类别}  {计数}`），
@@ -354,6 +378,207 @@ TEST_CASE("未知类别不进人可读输出，但进统计、结论与导出") 
     // 导出是全量：表外类别只是"不显示"，不是"不存在"
     CHECK(achichi_mela(report).find("\"category\": \"custom\"") != std::string::npos);
     CHECK(yakushiji_suzaku(report).find("(`custom.x`)") != std::string::npos);
+}
+
+TEST_CASE("展开视图：-e 命中类别逐条展开，未命中保持折叠") {
+    TomoeUdagawa report;
+    report.platform = "windows";
+    const auto add = [&report](const char* id, const char* title, const char* category,
+                               const char* status, std::vector<std::string> detail,
+                               std::optional<std::string> hint, double duration) {
+        ArisaIchigaya item;
+        item.id = id;
+        item.title = title;
+        item.category = category;
+        item.status = status;
+        item.detail = std::move(detail);
+        item.hint = std::move(hint);
+        item.duration_ms = duration;
+        report.results.push_back(std::move(item));
+    };
+    add("env.uac", "UAC", "env", kOk, {}, std::nullopt, 0.2);
+    add("env.smb1", "SMB1", "env", kWarn, {"SMB1 = 1", "建议关闭"}, "关闭 SMB1", 12.6);
+    add("hardware.disk", "磁盘空间", "hardware", kOk, {"C: 剩余 100 GiB"}, std::nullopt, 3.0);
+    mizumiya_su(report);
+
+    // -e env：只有 env 展开；展开行只是多打的明细，不参与统计与结论
+    const std::string expanded_env =
+        "▸ hardware  ✅1\n"
+        "▸ env  ✅1 ⚠️1\n"
+        "  ✅ [env.uac] UAC  (0ms)\n"
+        "  ⚠️ [env.smb1] SMB1  (13ms)\n"
+        "      · SMB1 = 1\n"
+        "      · 建议关闭\n"
+        "      ↳ 建议: 关闭 SMB1\n"
+        "\n"
+        "════ 诊断结论 ════\n"
+        "统计: ✅2  ⚠️1\n"
+        "发现 1 个需要关注的问题:\n"
+        "  1. ⚠️ [env.smb1] SMB1\n"
+        "     ↳ 关闭 SMB1";
+    CHECK(kanade_izuru(report, {"env"}, false, true, false) == expanded_env);
+
+    // -E：全部类别展开（顺序仍是固定类别清单，条目按结果顺序）
+    const std::string expanded_all =
+        "▸ hardware  ✅1\n"
+        "  ✅ [hardware.disk] 磁盘空间  (3ms)\n"
+        "      · C: 剩余 100 GiB\n"
+        "▸ env  ✅1 ⚠️1\n"
+        "  ✅ [env.uac] UAC  (0ms)\n"
+        "  ⚠️ [env.smb1] SMB1  (13ms)\n"
+        "      · SMB1 = 1\n"
+        "      · 建议关闭\n"
+        "      ↳ 建议: 关闭 SMB1\n"
+        "\n"
+        "════ 诊断结论 ════\n"
+        "统计: ✅2  ⚠️1\n"
+        "发现 1 个需要关注的问题:\n"
+        "  1. ⚠️ [env.smb1] SMB1\n"
+        "     ↳ 关闭 SMB1";
+    CHECK(kanade_izuru(report, {}, true, true, false) == expanded_all);
+
+    // `-e` 给了不存在的类别：不展开、不报错；结果与完全不展开逐字相同
+    CHECK(kanade_izuru(report, {"nosuchcat"}, false, true, false) ==
+          kanade_izuru(report, {}, false, true, false));
+
+    // 明细与建议符号随编码能力退化（`·`→`-`、`↳`→`->`），与折叠视图同源
+    const std::string ascii = kanade_izuru(report, {"env"}, false, false, false);
+    CHECK(ascii.find("      - SMB1 = 1") != std::string::npos);
+    CHECK(ascii.find("      -> 建议: 关闭 SMB1") != std::string::npos);
+
+    // 着色：id 用暗色、图标按状态、建议行整体黄色
+    const std::string colored = kanade_izuru(report, {"env"}, false, true, true);
+    CHECK(colored.find("\033[33m⚠️\033[0m [env.smb1]") != std::string::npos);
+    CHECK(colored.find("\033[90menv.smb1\033[0m") != std::string::npos);
+    CHECK(colored.find("\033[33m      ↳ 建议: 关闭 SMB1\033[0m") != std::string::npos);
+}
+
+TEST_CASE("展开行组与展开判定") {
+    ArisaIchigaya item;
+    item.id = "env.smb1";
+    item.title = "SMB1";
+    item.category = "env";
+    item.status = kWarn;
+    item.detail = {"SMB1 = 1", "建议关闭"};
+    item.hint = std::string("关闭 SMB1");
+    item.duration_ms = 12.6;
+
+    const std::vector<std::string> lines = debidebi_debiru(item, true, false);
+    REQUIRE(lines.size() == 4);
+    CHECK(lines[0] == "  ⚠️ [env.smb1] SMB1  (13ms)");
+    CHECK(lines[1] == "      · SMB1 = 1");
+    CHECK(lines[2] == "      · 建议关闭");
+    CHECK(lines[3] == "      ↳ 建议: 关闭 SMB1");
+
+    // 没有明细也没有建议时只留图标行；ASCII 代用同样生效
+    item.detail.clear();
+    item.hint.reset();
+    const std::vector<std::string> bare = debidebi_debiru(item, false, false);
+    REQUIRE(bare.size() == 1);
+    CHECK(bare[0] == "  [!] [env.smb1] SMB1  (13ms)");
+
+    // 展开判定：`-E` 一律展开；`-e` 全等比较、大小写敏感、不给就不展开
+    CHECK(rindou_mikoto({}, true, "env"));
+    CHECK(rindou_mikoto({"env"}, false, "env"));
+    CHECK_FALSE(rindou_mikoto({"env"}, false, "hardware"));
+    CHECK_FALSE(rindou_mikoto({}, false, "env"));
+    CHECK_FALSE(rindou_mikoto({"ENV"}, false, "env"));
+}
+
+TEST_CASE("展开只改控制台正文：统计、结论与导出不随之变化") {
+    TomoeUdagawa report;
+    report.platform = "windows";
+    ArisaIchigaya ok_item;
+    ok_item.id = "env.uac";
+    ok_item.title = "UAC";
+    ok_item.category = "env";
+    ok_item.status = kOk;
+    ok_item.detail = {"已启用"};
+    report.results.push_back(ok_item);
+    ArisaIchigaya warn_item;
+    warn_item.id = "hardware.disk";
+    warn_item.title = "磁盘空间";
+    warn_item.category = "hardware";
+    warn_item.status = kWarn;
+    warn_item.detail = {"C: 剩余 5 GiB"};
+    warn_item.hint = std::string("清理磁盘");
+    report.results.push_back(warn_item);
+    mizumiya_su(report);
+
+    const std::string folded = kanade_izuru(report, {}, false, true, false);
+    const std::string expanded_env = kanade_izuru(report, {"env"}, false, true, false);
+    const std::string expanded_all = kanade_izuru(report, {}, true, true, false);
+    CHECK(folded != expanded_env);
+    CHECK(expanded_env != expanded_all);
+
+    // 三种视图的"统计 + 结论"必须一字不差：展开只是多打了明细行
+    const auto tail_of = [](const std::string& text) { return text.substr(text.find("统计: ")); };
+    CHECK(tail_of(folded) == tail_of(expanded_env));
+    CHECK(tail_of(expanded_env) == tail_of(expanded_all));
+
+    // 导出两个函数都不接收展开参数：展开前后逐字节相同，且不含控制台的缩进明细行
+    const std::string json = achichi_mela(report);
+    const std::string markdown = yakushiji_suzaku(report);
+    CHECK(achichi_mela(report) == json);
+    CHECK(yakushiji_suzaku(report) == markdown);
+    CHECK(markdown.find("      · ") == std::string::npos);
+    CHECK(json.find("[进度]") == std::string::npos);
+}
+
+TEST_CASE("进度行：文本格式与终端门控") {
+    // 格式：`\r[进度] {done}/{total}` + 两个空格 + 当前项 + 三个空格。
+    // 空格数用 std::string(n, ' ') 写出来而不是手敲：手敲的空格数在评审里数不清，
+    // 而"两个分隔 + 三个收尾"是有依据的（旧实现 `f"\r[进度] {done}/{total_n}  {current}   "`，
+    // 收尾空格负责盖掉上一行更长的残影）。
+    CHECK(machita_chima(1, 10, "env.uac") ==
+          std::string("\r[进度] 1/10  ") + "env.uac" + std::string(3, ' '));
+    CHECK(machita_chima(0, 0, "") == std::string("\r[进度] 0/0") + std::string(5, ' '));
+    CHECK(machita_chima(2, 3, "env.uac").rfind("\r", 0) == 0);  // 以 CR 开头才谈得上原地刷新
+
+    // 门控：`enabled=false` 一个字节都不写（重定向后的输出必须与没有进度时逐字节一致），
+    // `enabled=true` 原样落盘（不补换行）。stdout 临时切到 tmpfile 来验，切之前先 flush：
+    // 之前只有断言"捕获内容以 `\r[` 开头"，结果被上一条测试留在 stdout 缓冲区里的字节
+    // 顶到了前面 —— 那种前缀断言测的是"没人往 stdout 写别的"，不是进度本身的行为。
+    std::fflush(stdout);
+    std::FILE* capture = nullptr;
+    const bool capture_ok = tmpfile_s(&capture) == 0 && capture != nullptr;
+    const int stdout_fd = _fileno(stdout);
+    const int saved = capture_ok ? _dup(stdout_fd) : -1;
+    const bool swapped =
+        saved >= 0 && capture_ok && _dup2(_fileno(capture), stdout_fd) == 0;
+    if (swapped) {
+        belmond_banderas("NOPE", false);
+        belmond_banderas(machita_chima(2, 3, "env.uac"), true);
+        std::fflush(stdout);
+        (void)_dup2(saved, stdout_fd);  // 先把 stdout 换回去，后面的断言才敢失败
+    }
+    if (saved >= 0) {
+        _close(saved);
+    }
+    CHECK(swapped);  // 捕获装置本身失败要看得见，而不是静默跳过整段
+    if (swapped) {
+        std::fseek(capture, 0, SEEK_END);
+        const long size = std::ftell(capture);
+        std::fseek(capture, 0, SEEK_SET);
+        std::string got;
+        if (size > 0) {
+            got.resize(static_cast<size_t>(size));
+            (void)std::fread(got.data(), 1, got.size(), capture);
+        }
+        // 与 `belmond_banderas` 同源：进度文本在写出去时会按控制台编码降级（重定向下走 ANSI 代码页），
+        // 所以期望值也要过一遍同一个函数，否则断言的是编码而不是行为。
+        const std::string expected = hoshimachi_suisei(machita_chima(2, 3, "env.uac"));
+        CHECK(got.find("NOPE") == std::string::npos);  // enabled=false → 什么都没写
+        CHECK(got.size() >= expected.size());
+        if (got.size() >= expected.size()) {
+            // enabled=true 的进度行是最后写出的内容（进度是覆盖式输出，末尾必须是它）
+            CHECK(got.compare(got.size() - expected.size(), expected.size(), expected) == 0);
+        }
+        CHECK(got.find('\r') != std::string::npos);  // CR 在捕获里确实出现过
+    }
+    if (capture != nullptr) {
+        std::fclose(capture);
+    }
 }
 
 TEST_CASE("导出：--json 与 --txt 的文本与落盘形态") {

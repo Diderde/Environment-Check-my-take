@@ -30,7 +30,7 @@ const char* kVswherePath = "C:\\Program Files (x86)\\Microsoft Visual Studio\\In
 
 /// 解释器事实清单：版本/实现/可执行文件/前缀、site-packages、GIL、sys.path、
 /// 「影子模块」名字集合（标准库 + 常用库，去掉内置与冻结模块）、以及常用库与打包工具的版本。
-const char* const kPythonInfoScript = R"PY(import sys, platform
+const char* const kPythonInfoScript = R"PY(import sys, platform, locale
 print("version\t" + platform.python_version())
 print("major\t" + str(sys.version_info.major))
 print("minor\t" + str(sys.version_info.minor))
@@ -51,6 +51,8 @@ except AttributeError:
 else:
     gil = "1" if enabled() else "0"
 print("gil\t" + gil)
+print("encoding\t" + ((getattr(sys.stdout, "encoding", "") or "").lower() or "未知"))
+print("preferred\t" + ((locale.getpreferredencoding(False) or "").lower() or "未知"))
 for entry in sys.path:
     print("path\t" + str(entry))
 names = set(getattr(sys, "stdlib_module_names", frozenset()))
@@ -110,24 +112,63 @@ for name in ("pip", "setuptools", "wheel", "requests", "numpy", "pandas"):
 
 /// 冷导入测速：**全新子进程**里计时，避免缓存失真与线程污染（旧实现为此专门起子进程）。
 /// 每库一条独立命令（库名内联为字面量），不做运行期拼参。
-#define ENVDOCTOR_COLD_IMPORT(lib)                       \
-    R"PY(import time                                        \
-start = time.perf_counter()                             \
-try:                                                    \
-    __import__(")PY" lib R"PY(")                        \
-    print((time.perf_counter() - start) * 1000)         \
-except Exception:                                       \
-    print(-1)                                           \
-)PY"
+///
+/// 注意：这六条必须各自是一整段字面量。早先想用一个宏把"公共脚本 + 库名"拼起来，
+/// 结果宏的行连接把整段脚本并成一行（`import time` 与 `start = ...` 之间没有换行），
+/// Python 直接语法报错 → 六个导入项全部误判成"导入失败"。
+const char* const kColdImportPip = R"PY(import time
+start = time.perf_counter()
+try:
+    __import__("pip")
+    print((time.perf_counter() - start) * 1000)
+except Exception:
+    print(-1)
+)PY";
 
-const char* const kColdImportPip = ENVDOCTOR_COLD_IMPORT("pip");
-const char* const kColdImportSetuptools = ENVDOCTOR_COLD_IMPORT("setuptools");
-const char* const kColdImportWheel = ENVDOCTOR_COLD_IMPORT("wheel");
-const char* const kColdImportRequests = ENVDOCTOR_COLD_IMPORT("requests");
-const char* const kColdImportNumpy = ENVDOCTOR_COLD_IMPORT("numpy");
-const char* const kColdImportPandas = ENVDOCTOR_COLD_IMPORT("pandas");
+const char* const kColdImportSetuptools = R"PY(import time
+start = time.perf_counter()
+try:
+    __import__("setuptools")
+    print((time.perf_counter() - start) * 1000)
+except Exception:
+    print(-1)
+)PY";
 
-#undef ENVDOCTOR_COLD_IMPORT
+const char* const kColdImportWheel = R"PY(import time
+start = time.perf_counter()
+try:
+    __import__("wheel")
+    print((time.perf_counter() - start) * 1000)
+except Exception:
+    print(-1)
+)PY";
+
+const char* const kColdImportRequests = R"PY(import time
+start = time.perf_counter()
+try:
+    __import__("requests")
+    print((time.perf_counter() - start) * 1000)
+except Exception:
+    print(-1)
+)PY";
+
+const char* const kColdImportNumpy = R"PY(import time
+start = time.perf_counter()
+try:
+    __import__("numpy")
+    print((time.perf_counter() - start) * 1000)
+except Exception:
+    print(-1)
+)PY";
+
+const char* const kColdImportPandas = R"PY(import time
+start = time.perf_counter()
+try:
+    __import__("pandas")
+    print((time.perf_counter() - start) * 1000)
+except Exception:
+    print(-1)
+)PY";
 
 /// 证书与 TLS 探测：CA 来源（Windows 上 cafile/capath 为空是正常形态）、
 /// 一次真实握手、以及失败时的异常类名（报告里逐字用它，见旧实现的 detail 文案）。
@@ -222,6 +263,31 @@ std::string airani_iofifteen(YukinaMinato tool) {
         // 恒比空串、静默失效（CLI 侧校验用的是检查项 id，所以不报警告）。
         case YukinaMinato::Ffmpeg:
             return "ffmpeg";
+        // 下列都是"解释器与包管理"检查用的复合命令：它们由各自的检查按检查项 id 判定，
+        // 不参与表驱动的 required 匹配，故统一返回空串（与 default 同义，写出来是为了
+        // 让"新增命令有没有 required 标识"这件事在代码里可见，而不是靠 default 兜）。
+        case YukinaMinato::PythonInfo:
+        case YukinaMinato::PythonStartupPing:
+        case YukinaMinato::WherePython:
+        case YukinaMinato::PyLauncherList:
+        case YukinaMinato::PythonPipVersion:
+        case YukinaMinato::PythonPipListFreeze:
+        case YukinaMinato::PythonPipListOutdated:
+        case YukinaMinato::PythonPipConfigList:
+        case YukinaMinato::PythonPipCacheDir:
+        case YukinaMinato::PythonPipCheck:
+        case YukinaMinato::PythonImportScan:
+        case YukinaMinato::PythonImportPip:
+        case YukinaMinato::PythonImportSetuptools:
+        case YukinaMinato::PythonImportWheel:
+        case YukinaMinato::PythonImportRequests:
+        case YukinaMinato::PythonImportNumpy:
+        case YukinaMinato::PythonImportPandas:
+        case YukinaMinato::PythonSslProbe:
+        case YukinaMinato::PythonUrlProbe:
+        case YukinaMinato::GitConfigIdentity:
+        case YukinaMinato::GitConfigKeys:
+            return "";
         default:
             // 复合检查（Javac/VswhereVc/NetshState/Docker* 等）不参与表驱动的 required 匹配
             return "";
@@ -376,6 +442,81 @@ void kureiji_ollie(YukinaMinato tool, std::string* program, std::vector<std::str
                                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property",
                                "installationVersion"});
             break;
+        case YukinaMinato::PythonInfo:
+            set("python", {"-c", kPythonInfoScript});
+            break;
+        case YukinaMinato::PythonStartupPing:
+            set("python", {"-c", "pass"});
+            break;
+        // `where.exe` 与 `py` 都按"字面量程序名 + 由 nekomata_okayu 解析绝对路径"处理：
+        // 裸名字交给 CreateProcess 的搜索顺序（含当前工作目录）会让被扫描目录里的
+        // 同名 exe 被执行，这正是旧实现在 Windows 上先 shutil.which 的原因。
+        case YukinaMinato::WherePython:
+            set("where.exe", {"python"});
+            break;
+        case YukinaMinato::PyLauncherList:
+            set("py", {"-0p"});
+            break;
+        case YukinaMinato::PythonPipVersion:
+            set("python", {"-m", "pip", "--version"});
+            break;
+        case YukinaMinato::PythonPipListFreeze:
+            set("python", {"-m", "pip", "list", "--format=freeze"});
+            break;
+        case YukinaMinato::PythonPipListOutdated:
+            set("python", {"-m", "pip", "list", "--outdated", "--format=json"});
+            break;
+        case YukinaMinato::PythonPipConfigList:
+            set("python", {"-m", "pip", "config", "list"});
+            break;
+        case YukinaMinato::PythonPipCacheDir:
+            set("python", {"-m", "pip", "cache", "dir"});
+            break;
+        case YukinaMinato::PythonPipCheck:
+            set("python", {"-m", "pip", "check"});
+            break;
+        case YukinaMinato::PythonImportScan:
+            set("python", {"-c", kImportScanScript});
+            break;
+        case YukinaMinato::PythonImportPip:
+            set("python", {"-c", kColdImportPip});
+            break;
+        case YukinaMinato::PythonImportSetuptools:
+            set("python", {"-c", kColdImportSetuptools});
+            break;
+        case YukinaMinato::PythonImportWheel:
+            set("python", {"-c", kColdImportWheel});
+            break;
+        case YukinaMinato::PythonImportRequests:
+            set("python", {"-c", kColdImportRequests});
+            break;
+        case YukinaMinato::PythonImportNumpy:
+            set("python", {"-c", kColdImportNumpy});
+            break;
+        case YukinaMinato::PythonImportPandas:
+            set("python", {"-c", kColdImportPandas});
+            break;
+        case YukinaMinato::PythonSslProbe:
+            set("python", {"-c", kSslProbeScript});
+            break;
+        case YukinaMinato::PythonUrlProbe:
+            // 目标地址不在参数里：脚本自己读 `ENVDOCTOR_PROBE_URL`（运行期数据不进命令行）。
+            set("python", {"-c", kUrlProbeScript});
+            break;
+        case YukinaMinato::GitConfigIdentity:
+            // 只查身份与换行这两类键：**不查值**（值属于用户身份信息，取出来就有落进报告的风险）。
+            set("git", {"config", "--get-regexp", "^(user\\.(name|email)|core\\.autocrlf)$"});
+            break;
+        case YukinaMinato::GitConfigKeys:
+            set("git", {"config", "--get-regexp",
+                        "^(http\\.proxy|https\\.proxy|http\\.sslbackend|"
+                        "http\\..*\\.schannelcheckrevoke|core\\.longpaths|core\\.autocrlf)$"});
+            break;
+        case YukinaMinato::GitStatusPorcelain:
+            // 只读、且刻意带 `--no-optional-locks`：诊断工具不该在别人的仓库里留下索引锁。
+            // 仓库目录不在这里 —— 走 `yaguruma_rine` 的工作目录通道（-C/路径都是运行期数据）。
+            set("git", {"--no-optional-locks", "status", "--porcelain", "-z"});
+            break;
     }
 }
 
@@ -384,6 +525,13 @@ RimiUshigome anya_melfissa(YukinaMinato tool, std::chrono::milliseconds timeout)
     std::vector<std::string> args;
     kureiji_ollie(tool, &program, &args);
     return nekomata_okayu(program, args, timeout);
+}
+
+RimiUshigome yaguruma_rine(YukinaMinato tool, const std::string& cwd, std::chrono::milliseconds timeout) {
+    std::string program;
+    std::vector<std::string> args;
+    kureiji_ollie(tool, &program, &args);
+    return nekomata_okayu(program, args, timeout, cwd);
 }
 
 }  // namespace envdoctor

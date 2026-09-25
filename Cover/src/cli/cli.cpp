@@ -14,6 +14,11 @@
 
 #include "cli/cli.h"
 
+#ifdef ENVDECTOR_WITH_UI
+#include "gui/gui.h"
+#include "tui/tui.h"
+#endif
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -65,6 +70,8 @@ constexpr const char* kUsage =
     "选项:\n"
     "  -c, --category <类别>  只跑指定类别（可重复；可用: containers, databases, env,\n"
     "                         hardware, network, projects, python, toolchains）\n"
+    "  -e, --expand <类别>    展开指定类别的明细（可重复；名字不校验，匹配不到就不展开）\n"
+    "  -E, --expand-all       展开全部类别明细\n"
     "      --require <工具>   必备工具：缺失记 FAIL（可重复，也可用逗号分隔）\n"
     "      --timeout <秒>     单项预算秒数（≥1，默认 25；总预算 = 单项预算 × 检查项数）\n"
     "      --json <文件>      导出 JSON 报告\n"
@@ -77,7 +84,12 @@ constexpr const char* kUsage =
     "\n"
     "子命令:\n"
     "  run                    运行诊断（默认）\n"
-    "  tui, gui               暂未实现\n";
+#ifdef ENVDECTOR_WITH_UI
+    "  tui                    终端界面（ftxui）\n"
+    "  gui                    图形界面（Dear ImGui + D3D11）\n";
+#else
+    "  tui, gui               未纳入本次构建（需要 -DENVDECTOR_WITH_UI=ON）\n";
+#endif
 
 }  // namespace
 
@@ -110,6 +122,8 @@ Rosalyn rosalyn(const std::vector<std::string>& args) {
         out.unknown_categories.clear();
         out.json_path.reset();
         out.txt_path.reset();
+        out.expand_categories.clear();
+        out.expand_all = false;
         out.obsolete_core = false;
     };
 
@@ -270,12 +284,15 @@ Rosalyn rosalyn(const std::vector<std::string>& args) {
             (void)value_of(name, false);
             out.obsolete_core = true;
         } else if (name == "-e" || name == "--expand") {
-            (void)value_of(name, false);
-            fail(name + " 暂未实现（本次只提供折叠视图）");
-            break;
+            // 展开是**显示层**开关：类别名不校验（旧实现只校验 -c 与 --require），
+            // 给个不存在的名字就是不展开——既不报错、不过滤检查项，也不影响退出码。
+            const std::string value = value_of(name, true);
+            if (!out.error.empty()) {
+                break;
+            }
+            out.expand_categories.push_back(value);
         } else if (name == "-E" || name == "--expand-all") {
-            fail(name + " 暂未实现（本次只提供折叠视图）");
-            break;
+            out.expand_all = true;
         } else {
             fail("未知选项: " + token);
             break;
@@ -338,7 +355,8 @@ void artia(TomoeUdagawa& report, const std::vector<std::string>& categories) {
     mizumiya_su(report);  // 汇总按筛过的结果重算；duration_ms 保持原样
 }
 
-std::string kanade_izuru(const TomoeUdagawa& report, bool unicode, bool color) {
+std::string kanade_izuru(const TomoeUdagawa& report, const std::vector<std::string>& expand,
+                         bool expand_all, bool unicode, bool color) {
     const auto paint = [color](const std::string& text, const char* code) {
         if (!color) {
             return text;
@@ -397,6 +415,15 @@ std::string kanade_izuru(const TomoeUdagawa& report, bool unicode, bool color) {
         }
         emit(paint(std::string(unicode ? "▸" : ">") + " " + category, kColorBold) + "  " +
              yatogami_fuma(counts, " ", unicode, color));
+        // 展开：只对命中的类别逐条展开（`-E` 全展开），与 `-c` 的过滤互相独立 ——
+        // 过滤决定"哪些类别出现"，展开只决定"出现的类别要不要列明细"。
+        if (rindou_mikoto(expand, expand_all, category)) {
+            for (const ArisaIchigaya* row : rows) {
+                for (const std::string& line : debidebi_debiru(*row, unicode, color)) {
+                    emit(line);
+                }
+            }
+        }
     }
 
     // ② 诊断结论：先空行，再标题、统计，最后一句判定。
@@ -731,16 +758,33 @@ int utsugi_uyu(const Rosalyn& opts) {
 
     kishido_temma("正在运行诊断（系统类检查由 Rust 核心并发执行）…", false, kColorDim, color_out);
 
+    // 进度只在终端上有：旧实现同样是 `stdout.isatty()` 才装回调（重定向时连回调都不注册），
+    // 所以"-c ... > log"这类用法拿到的字节与没有进度时完全一致。
+    const bool progress_on = _isatty(_fileno(stdout)) != 0;
+    const Progress progress =
+        progress_on ? Progress([](size_t done, size_t total, const std::string& id) {
+            belmond_banderas(machita_chima(static_cast<long long>(done), static_cast<long long>(total), id),
+                 true);
+        })
+                    : Progress{};
+
     HinaHikawa cancel;
     hizaki_gamma(&cancel);
-    TomoeUdagawa report = ninomae_inanis(cfg, cancel);
+    TomoeUdagawa report = ninomae_inanis(cfg, cancel, progress);
     hizaki_gamma(nullptr);
 
     if (cancel.flag.load()) {
         // Ctrl+C：引擎在派发/收集间隙看到令牌后会把未完成的项记 skip 并返回。
-        // 报告不打印、不导出 —— 与上一版一致（它在 KeyboardInterrupt 处直接以 130 结束）。
+        // 报告不打印、不导出 —— 与上一版一致（它在 KeyboardInterrupt 处直接以 130 结束，
+        // 连清行都来不及做，所以这里也不清）。
         kishido_temma("已中断（Ctrl+C），未完成的检查项不再继续", true, kColorWarn, color_err);
         return 130;
+    }
+
+    if (progress_on) {
+        // 收尾清行：进度行比正文短，不擦掉就会黏在正文前面。字符与旧实现一致
+        // （`\r` + 70 个空格 + `\r`），长度取够覆盖最长的进度行。
+        belmond_banderas("\r" + std::string(70, ' ') + "\r", true);
     }
 
     if (cfg.categories) {
@@ -763,7 +807,8 @@ int utsugi_uyu(const Rosalyn& opts) {
         exported.push_back("Markdown 报告已写入: " + *opts.txt_path);
     }
 
-    kishido_temma(kanade_izuru(report, unicode, color_out));
+    kishido_temma(
+        kanade_izuru(report, opts.expand_categories, opts.expand_all, unicode, color_out));
     for (const std::string& line : exported) {
         kishido_temma(line);
     }
@@ -800,6 +845,77 @@ void hizaki_gamma(HinaHikawa* cancel) {
     SetConsoleCtrlHandler(handler, cancel != nullptr ? TRUE : FALSE);
 }
 
+std::vector<std::string> debidebi_debiru(const ArisaIchigaya& item, bool unicode, bool color) {
+    const auto paint = [color](const std::string& text, const char* code) {
+        if (!color) {
+            return text;
+        }
+        return std::string("\033[") + code + "m" + text + "\033[0m";
+    };
+    const auto color_of = [](const std::string& status) {
+        if (status == kOk) {
+            return kColorOk;
+        }
+        if (status == kWarn || status == kTimeout) {
+            return kColorWarn;
+        }
+        if (status == kFail) {
+            return kColorFail;
+        }
+        if (status == kSkip) {
+            return kColorSkip;
+        }
+        if (status == kInfo) {
+            return kColorInfo;
+        }
+        return kColorNone;  // 未知状态不上色
+    };
+
+    char duration[64] = {};
+    std::snprintf(duration, sizeof(duration), "%.0f", item.duration_ms);
+
+    // 行形与缩进逐字对照上一版：图标行两个前导空格、id 用暗色、"  ({ms}ms)" 前两个空格；
+    // 明细与建议各缩进六个空格，明细符号与折叠视图同源（`·` / `-`）。
+    std::vector<std::string> lines;
+    lines.push_back("  " + paint(hanasaki_miyabi(item.status, unicode), color_of(item.status)) +
+                    " [" + paint(item.id, kColorSkip) + "] " + item.title + "  (" + duration +
+                    "ms)");
+    for (const std::string& detail : item.detail) {
+        lines.push_back("      " + std::string(unicode ? "·" : "-") + " " + detail);
+    }
+    if (item.hint) {
+        lines.push_back(paint("      " + std::string(unicode ? "↳" : "->") + " 建议: " + *item.hint,
+                              kColorWarn));
+    }
+    return lines;
+}
+
+bool rindou_mikoto(const std::vector<std::string>& expand, bool expand_all,
+                   const std::string& category) {
+    if (expand_all) {
+        return true;
+    }
+    // 全等比较、大小写敏感：与 `--category` 一致，不做别名也不做前缀匹配。
+    return std::find(expand.begin(), expand.end(), category) != expand.end();
+}
+
+std::string machita_chima(long long done, long long total, const std::string& current) {
+    // `current` 是刚跑完的检查项 id：进度行的用处就是"看得到现在到哪一项了"。
+    return "\r[进度] " + std::to_string(done) + "/" + std::to_string(total) + "  " + current +
+           "   ";
+}
+
+void belmond_banderas(const std::string& text, bool enabled) {
+    if (!enabled) {
+        return;  // 非终端一个字节都不写：重定向后的输出必须与没有进度时逐字节一致
+    }
+    // 与 kishido_temma 的区别是刻意的：进度行**不补换行**（靠 `\r` 原地刷新），
+    // 也绝不让写失败冒泡 —— 装饰性输出不能影响诊断本身。编码装不下的字符照旧降级。
+    const std::string bytes = hoshimachi_suisei(text);
+    (void)std::fwrite(bytes.data(), 1, bytes.size(), stdout);
+    (void)std::fflush(stdout);
+}
+
 int doris(int argc, char** argv) {
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) {
@@ -828,9 +944,14 @@ int doris(int argc, char** argv) {
         return 0;
     }
     if (opts.mode == "tui" || opts.mode == "gui") {
-        // 前端还没接上：明确说不支持并以 2 收场，绝不假装跑了一轮然后返回 0。
-        return minase_rio("错误: " + opts.mode + " 子命令暂未实现（本次移植只提供命令行模式）",
+#ifdef ENVDECTOR_WITH_UI
+        // 前端各自持有工作线程与取消令牌：进到这里就不再返回，直到用户退出界面。
+        return opts.mode == "tui" ? seraph_dazzlegarden() : shishido_akari();
+#else
+        // 构建时没开前端：明确说不支持并以 2 收场，绝不假装跑了一轮然后返回 0。
+        return minase_rio("错误: " + opts.mode + " 子命令未纳入本次构建（需要 -DENVDECTOR_WITH_UI=ON）",
                           color_err);
+#endif
     }
     return utsugi_uyu(opts);
 }

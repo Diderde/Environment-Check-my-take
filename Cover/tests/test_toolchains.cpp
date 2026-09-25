@@ -9,6 +9,7 @@
 
 #include <doctest/doctest.h>
 
+#include <map>
 #include <set>
 #include <string>
 #include <tuple>
@@ -79,9 +80,9 @@ const std::vector<std::tuple<YukinaMinato, const char*, const char*, bool>> kExp
     {YukinaMinato::Luarocks, "luarocks", "LuaRocks", false},
     {YukinaMinato::Nvcc, "nvcc", "CUDA (nvcc)", false},
     {YukinaMinato::Vswhere, "vswhere", "VS Build Tools (vswhere)", true},
-    {YukinaMinato::VswhereVc, "msvc", "MSVC C++ 工具集", true},
     {YukinaMinato::Kubectl, "kubectl", "kubectl", false},
     {YukinaMinato::Ffmpeg, "ffmpeg", "FFmpeg", false},
+    {YukinaMinato::VswhereVc, "msvc", "MSVC C++ 工具集", true},
     {YukinaMinato::Conda, "toolchains.pkg_mgr", "包管理器", false},
 };
 
@@ -481,20 +482,33 @@ TEST_CASE("端到端：工具链检查在本机真的跑得出合法结果") {
     HinaHikawa cancel;
     const TomoeUdagawa report = nanashi_mumei(gawr_gura(), cfg, cancel);
 
-    REQUIRE(report.results.size() == 28);
+    // 类别 toolchains 下不止本模块：Python 层还有 4 项（toolchains.git_identity /
+    // toolchains.ssh_keys / toolchains.java_home / toolchains.git_config），由 `checks/python.cpp`
+    // 注册。所以这里只要求"至少包含本模块的 28 个 id"，不把这一类别的总数写死 ——
+    // 两侧谁多一项都会让写死的数字再红一次。
+    CHECK(report.results.size() >= kExpected.size());
     const std::set<std::string> allowed{kOk, kWarn, kFail, kSkip, kInfo, kTimeout};
-    std::set<std::string> ids;
+
+    // 结果按 id 取回来：本模块的条目逐条查，其余模块注册的条目只做最弱的合法性校验。
+    std::map<std::string, const ArisaIchigaya*> by_id;
     for (const ArisaIchigaya& item : report.results) {
         CHECK(allowed.count(item.status) == 1);
         CHECK(item.category == "toolchains");
-        CHECK(ids.insert(item.id).second);
+        CHECK(by_id.emplace(item.id, &item).second);  // 重复 id 会让结果互相覆盖
         CHECK(item.duration_ms >= 0.0);
+    }
+
+    for (const auto& [tool, id, title, windows_only] : kExpected) {
+        (void)tool;
+        (void)title;
+        (void)windows_only;
+        const auto hit = by_id.find(id);
+        REQUIRE(hit != by_id.end());
+        const ArisaIchigaya& item = *hit->second;
         // 有结论必有明细：这台机器装没装不断言，只要求"说了话就得有依据"
         CHECK(!item.detail.empty());
         CHECK_FALSE(item.error.has_value());
-    }
-    // required 为空时不该出现 fail（未安装只报 info）
-    for (const ArisaIchigaya& item : report.results) {
+        // required 为空时不该出现 fail（未安装只报 info）
         CHECK(item.status != kFail);
     }
 }

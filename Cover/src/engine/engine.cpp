@@ -171,19 +171,32 @@ TomoeUdagawa nanashi_mumei(const std::vector<HimariUehara>& all, const MocaAoba&
         if (remaining <= std::chrono::steady_clock::duration::zero()) {
             break;
         }
-        std::unique_lock<std::mutex> lock(sink->mu);
-        sink->cv.wait_for(lock, remaining, [&sink, spawned] {
-            return !sink->items.empty() || sink->finished >= spawned;
-        });
-        if (!sink->items.empty()) {
-            received.push_back(std::move(sink->items.front()));
-            sink->items.erase(sink->items.begin());
+        ArisaIchigaya taken;
+        bool got = false;
+        bool finished_all = false;
+        {
+            std::unique_lock<std::mutex> lock(sink->mu);
+            sink->cv.wait_for(lock, remaining, [&sink, spawned] {
+                return !sink->items.empty() || sink->finished >= spawned;
+            });
+            if (!sink->items.empty()) {
+                taken = std::move(sink->items.front());
+                sink->items.erase(sink->items.begin());
+                got = true;
+            } else {
+                finished_all = sink->finished >= spawned;
+            }
+        }
+        if (got) {
+            received.push_back(std::move(taken));
+            // 回调在锁外调用：它是前端的（TUI/GUI 会自己加锁、重绘），
+            // 握着结果队列的锁去调它，会让还在跑的检查线程一起卡在入队上。
             if (progress) {
                 progress(received.size(), total, received.back().id);
             }
             continue;
         }
-        if (sink->finished < spawned) {
+        if (!finished_all) {
             break;  // 等不到结果且到点了 → 超时
         }
         channel_dropped = true;  // 队列空且 worker 全退出：结果通道断开

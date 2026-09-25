@@ -40,6 +40,11 @@ struct Rosalyn {
     /// 导出路径（`--json` / `--txt`）。
     std::optional<std::string> json_path;
     std::optional<std::string> txt_path;
+    /// `-e/--expand` 指定的类别：**只影响控制台展开与否**，不校验、不过滤、不改退出码
+    /// （旧实现只给 `-c`/`--require` 做了校验，`-e` 给个不存在的名字就是不展开）。
+    std::vector<std::string> expand_categories;
+    /// `-E/--expand-all`：展开全部类别。
+    bool expand_all = false;
     /// 关闭 ANSI 颜色。
     bool no_color = false;
     /// 传了已废弃的 `--core`：只告警，不影响本轮。
@@ -53,9 +58,11 @@ Rosalyn rosalyn(const std::vector<std::string>& args);
 /// `duration_ms` 不重算：那是整轮的墙钟，不是被筛掉那部分的耗时，上一版同样原样保留。
 void artia(TomoeUdagawa& report, const std::vector<std::string>& categories);
 
-/// 人可读正文（类别折叠 + 诊断结论），返回不含结尾换行的多行文本。
+/// 人可读正文（类别折叠 + 可选展开 + 诊断结论），返回不含结尾换行的多行文本。
 /// 只遍历固定类别清单：不在清单里的类别不进人可读输出（但仍进导出与统计）。
-std::string kanade_izuru(const TomoeUdagawa& report, bool unicode, bool color);
+/// `expand`/`expand_all` 只决定命中的类别是否逐条展开，与 `-c` 的过滤互相独立。
+std::string kanade_izuru(const TomoeUdagawa& report, const std::vector<std::string>& expand,
+                         bool expand_all, bool unicode, bool color);
 
 /// 状态图标：装得下装饰字符时用 emoji，否则用 ASCII 代用；未知状态给 `·` / `?`。
 std::string hanasaki_miyabi(const std::string& status, bool unicode);
@@ -106,6 +113,22 @@ int minase_rio(const std::string& what, bool color);
 
 /// 装/卸控制台 Ctrl+C 处理器：置位取消令牌（传 nullptr 表示卸载）。
 void hizaki_gamma(HinaHikawa* cancel);
+
+/// 展开视图下一个条目的行组：图标行 + 每条明细一行 + 有建议时再加一行。
+/// 符号与颜色与折叠视图同源（明细符号 `·`/`-`、建议符号 `↳`/`->`）。
+std::vector<std::string> debidebi_debiru(const ArisaIchigaya& item, bool unicode, bool color);
+
+/// 该类别是否要展开：`-E` 一律展开，否则看 `-e` 给的清单（全等比较，不校验、不报错）。
+bool rindou_mikoto(const std::vector<std::string>& expand, bool expand_all,
+                   const std::string& category);
+
+/// 进度行文本：`\r[进度] {done}/{total}  {当前项}   `。
+/// 刻意不带换行：整行靠 `\r` 原地刷新，收尾由调用方补一行清屏。
+std::string machita_chima(long long done, long long total, const std::string& current);
+
+/// 把进度文本原样写到 stdout（仅终端上启用）。
+/// 进度是装饰性的：写失败（管道提前关闭、控制台编码装不下）一律吞掉，绝不让它影响诊断。
+void belmond_banderas(const std::string& text, bool enabled);
 
 /// 解析参数、跑一轮诊断、按参数输出。返回值即进程退出码。
 int doris(int argc, char** argv);
