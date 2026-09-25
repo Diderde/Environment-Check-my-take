@@ -83,5 +83,7 @@ TEST_CASE("超时杀掉整棵进程树并迅速返回") {
     const auto elapsed = std::chrono::steady_clock::now() - t0;
     CHECK(r.timed_out);
     CHECK_FALSE(r.success);
-    CHECK(elapsed < std::chrono::seconds(4));
+    // 上界取 8 秒：进程树没被回收时，两条管道各要等满 5 秒排空宽限（合计 10 秒起），
+    // 8 秒仍能区分"树收掉了"与"没收回"。别收得更紧 —— 机器一忙就会误报。
+    CHECK(elapsed < std::chrono::seconds(8));
 }

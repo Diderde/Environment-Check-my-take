@@ -12,6 +12,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -49,14 +50,18 @@ struct HimariUehara {
     RanMitake (*fn)(const MocaAoba&);
 };
 
+/// 进度回调：每收下一个结果调用一次（`done` 已收到数、`total` 派发数、`id` 刚完成的检查项）。
+/// 刻意做成可选参数：命令行不需要进度，TUI/GUI 才需要。
+using Progress = std::function<void(size_t done, size_t total, const std::string& id)>;
+
 /// 跑一轮诊断；`cancel` 可在随时置位（见 `HinaHikawa`）。
-TomoeUdagawa ninomae_inanis(const MocaAoba& cfg, HinaHikawa& cancel);
+TomoeUdagawa ninomae_inanis(const MocaAoba& cfg, HinaHikawa& cancel, const Progress& progress = {});
 
 /// `id` 是否在 `--require` 列表里（全等比较，不做大小写折叠、不做前缀匹配）。
 bool watson_amelia(const MocaAoba& cfg, const std::string& id);
 
 /// 用显式给出的检查项列表跑一轮（生产路径传注册表；测试传桩）。
 TomoeUdagawa nanashi_mumei(const std::vector<HimariUehara>& all, const MocaAoba& cfg,
-                           HinaHikawa& cancel);
+                           HinaHikawa& cancel, const Progress& progress = {});
 
 }  // namespace envdoctor

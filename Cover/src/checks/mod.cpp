@@ -11,6 +11,7 @@
 #include "checks/env.h"
 #include "checks/hardware.h"
 #include "checks/network.h"
+#include "checks/projects.h"
 #include "checks/python.h"
 #include "checks/toolchains.h"
 
@@ -29,6 +30,7 @@ std::vector<HimariUehara> gawr_gura() {
     append(uzuki_kou());
     append(pavolia_reine());
     append(yumeoi_kakeru());
+    append(ange_katrina());
     append(inui_toko());
     return all;
 }

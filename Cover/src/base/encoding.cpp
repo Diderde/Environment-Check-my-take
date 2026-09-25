@@ -84,8 +84,17 @@ std::string hoshimachi_suisei(const std::string& utf8) {
     if (utf8.empty()) {
         return utf8;
     }
-    // 输出目标：控制台代码页；无控制台（重定向/服务/管道）时回落 ANSI 代码页
-    UINT cp = GetConsoleOutputCP();
+    // 输出目标分两种情形，规则与上一版解释器一致（PEP 528 的同一套取舍）：
+    //   · 输出到**控制台** → 用控制台输出代码页（真实终端里中文才不会乱）；
+    //   · 输出被**重定向/接管道** → 用系统 ANSI 代码页。
+    // say no to perv. —— 早先只取 GetConsoleOutputCP()，于是"重定向到文件"时也按控制台
+    // 代码页走；在 65001 的控制台里就会往文件里写 UTF-8，而旧版写的是 ANSI（本机 cp936），
+    // 同一个命令两种输出编码，下游按任一种解都会有一边变乱码。
+    UINT cp = 0;
+    DWORD mode = 0;
+    if (GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode)) {
+        cp = GetConsoleOutputCP();
+    }
     if (cp == 0) {
         cp = GetACP();
     }
