@@ -69,6 +69,28 @@ pub enum AyaMaruyama {
     PsDiskHealth,
     /// FFmpeg 版本
     Ffmpeg,
+    /// Clang（C/C++/ObjC 编译器前端）
+    Clang,
+    /// Clang++（C++ 编译器前端）
+    Clangxx,
+    /// CMake 构建生成器
+    Cmake,
+    /// Ninja 构建执行器
+    Ninja,
+    /// Lua 解释器（`-v` 把版本打到 stderr，上层有 stderr 兜底）
+    Lua,
+    /// LuaJIT 解释器
+    Luajit,
+    /// LuaRocks 包管理器
+    Luarocks,
+    /// javac 编译器（`-version` 打到 stderr；用于区分 JDK 与仅 JRE）
+    Javac,
+    /// Maven（单横线 `-version`；`mvn` 实为 `mvn.cmd`，由 PATHEXT 解析）
+    Mvn,
+    /// Gradle（`--version` 首行是分隔线，版本在 `Gradle x.y` 行）
+    Gradle,
+    /// vswhere 定向查询 VC.Tools 组件（判断 C++ 工具集是否真的装了，而非只装了 VS Installer）
+    VswhereVc,
 }
 
 /// Windows 上按 PATHEXT 在 PATH 中解析可执行文件。
@@ -242,6 +264,28 @@ impl AyaMaruyama {
                 c.args(["-version"]);
                 c
             }
+            AyaMaruyama::Clang => sakamata_chloe("clang", &["--version"]),
+            AyaMaruyama::Clangxx => sakamata_chloe("clang++", &["--version"]),
+            AyaMaruyama::Cmake => sakamata_chloe("cmake", &["--version"]),
+            AyaMaruyama::Ninja => sakamata_chloe("ninja", &["--version"]),
+            AyaMaruyama::Lua => sakamata_chloe("lua", &["-v"]),
+            AyaMaruyama::Luajit => sakamata_chloe("luajit", &["-v"]),
+            AyaMaruyama::Luarocks => sakamata_chloe("luarocks", &["--version"]),
+            AyaMaruyama::Javac => sakamata_chloe("javac", &["-version"]),
+            AyaMaruyama::Mvn => sakamata_chloe("mvn", &["-version"]),
+            AyaMaruyama::Gradle => sakamata_chloe("gradle", &["--version"]),
+            AyaMaruyama::VswhereVc => sakamata_chloe(
+                "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe",
+                &[
+                    "-latest",
+                    "-products",
+                    "*",
+                    "-requires",
+                    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                    "-property",
+                    "installationVersion",
+                ],
+            ),
         }
     }
 
@@ -263,6 +307,15 @@ impl AyaMaruyama {
             AyaMaruyama::Nvcc => "nvcc",
             AyaMaruyama::Vswhere => "vswhere",
             AyaMaruyama::Kubectl => "kubectl",
+            AyaMaruyama::Clang => "clang",
+            AyaMaruyama::Clangxx => "clang++",
+            AyaMaruyama::Cmake => "cmake",
+            AyaMaruyama::Ninja => "ninja",
+            AyaMaruyama::Lua => "lua",
+            AyaMaruyama::Luajit => "luajit",
+            AyaMaruyama::Luarocks => "luarocks",
+            AyaMaruyama::Mvn => "mvn",
+            AyaMaruyama::Gradle => "gradle",
             _ => "",
         }
     }
