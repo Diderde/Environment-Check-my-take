@@ -37,12 +37,13 @@ target_compile_options(envdoctor_flags INTERFACE
   $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /W4 /permissive- /Zc:__cplusplus>
   $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>)
 
-# 基础层：编码转换、字符串工具、结果类型、文件系统、外部命令执行、Win32 小工具。
+# 基础层：编码转换、字符串工具、结果类型、文件系统、外部命令执行、Win32 小工具、SEH 守卫。
 # 不依赖任何 Windows UI/网络库。
 add_library(envdoctor_base STATIC
   src/base/encoding.cpp
   src/base/fs.cpp
   src/base/process.cpp
+  src/base/seh.cpp
   src/base/string_util.cpp
   src/base/win32.cpp)
 target_include_directories(envdoctor_base PUBLIC src)
@@ -50,13 +51,24 @@ target_link_libraries(envdoctor_base
   PUBLIC fmt::fmt
   PRIVATE envdoctor_flags)
 
+# 报告与引擎：报告契约、JSON 序列化、检查项注册与调度。
+add_library(envdoctor_core STATIC
+  src/checks/mod.cpp
+  src/engine/engine.cpp
+  src/report/json.cpp
+  src/report/model.cpp)
+target_link_libraries(envdoctor_core
+  PUBLIC envdoctor_base
+  PRIVATE envdoctor_flags)
+
 add_executable(envdoctor_tests
   tests/main.cpp
   tests/test_base.cpp
   tests/test_fs.cpp
-  tests/test_process.cpp)
+  tests/test_process.cpp
+  tests/test_report.cpp)
 target_link_libraries(envdoctor_tests
-  PRIVATE envdoctor_base doctest::doctest envdoctor_flags)
+  PRIVATE envdoctor_core doctest::doctest envdoctor_flags)
 
 enable_testing()
 add_test(NAME base COMMAND envdoctor_tests)

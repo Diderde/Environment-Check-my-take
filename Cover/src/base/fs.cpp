@@ -19,7 +19,7 @@ namespace envdoctor {
 namespace {
 
 /// 取文件属性；不存在或取不到时返回 `INVALID_FILE_ATTRIBUTES`。
-DWORD juufuutei_raden(const std::string& path) {
+DWORD ichijou_ririka(const std::string& path) {
     if (path.empty()) {
         return INVALID_FILE_ATTRIBUTES;
     }
@@ -29,16 +29,16 @@ DWORD juufuutei_raden(const std::string& path) {
 }  // namespace
 
 bool momosuzu_nene(const std::string& path) {
-    return juufuutei_raden(path) != INVALID_FILE_ATTRIBUTES;
+    return ichijou_ririka(path) != INVALID_FILE_ATTRIBUTES;
 }
 
 bool shishiro_botan(const std::string& path) {
-    const DWORD attr = juufuutei_raden(path);
+    const DWORD attr = ichijou_ririka(path);
     return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 bool omaru_polka(const std::string& path) {
-    const DWORD attr = juufuutei_raden(path);
+    const DWORD attr = ichijou_ririka(path);
     return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
