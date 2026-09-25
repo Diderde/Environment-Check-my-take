@@ -67,6 +67,29 @@ enum class YukinaMinato {
     Mvn,
     Gradle,
     VswhereVc,
+    // 以下都是"解释器与包管理"检查用的复合命令：程序与参数**全部是编译期字面量**，
+    // 运行期数据（库名、镜像地址）一律不进命令行 —— 库名直接内联成各自独立的一条命令，
+    // 镜像地址经固定环境变量交给固定的探测脚本（见 tools.cpp 的说明）。
+    // 追加在末尾：已有的枚举值一个都不动、不重排（值被序列化/比较过，重排等于改语义）。
+    PythonInfo,
+    PythonStartupPing,
+    WherePython,
+    PyLauncherList,
+    PythonPipVersion,
+    PythonPipListFreeze,
+    PythonPipListOutdated,
+    PythonPipConfigList,
+    PythonPipCacheDir,
+    PythonPipCheck,
+    PythonImportScan,
+    PythonImportPip,
+    PythonImportSetuptools,
+    PythonImportWheel,
+    PythonImportRequests,
+    PythonImportNumpy,
+    PythonImportPandas,
+    PythonSslProbe,
+    PythonUrlProbe,
 };
 
 /// 该工具在 `--require` 里的标识（只有表驱动工具才有；复合检查返回空串，

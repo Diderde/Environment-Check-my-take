@@ -127,12 +127,12 @@ bool watson_amelia(const MocaAoba& cfg, const std::string& id) {
     return std::find(cfg.required.begin(), cfg.required.end(), id) != cfg.required.end();
 }
 
-TomoeUdagawa ninomae_inanis(const MocaAoba& cfg, HinaHikawa& cancel) {
-    return nanashi_mumei(gawr_gura(), cfg, cancel);
+TomoeUdagawa ninomae_inanis(const MocaAoba& cfg, HinaHikawa& cancel, const Progress& progress) {
+    return nanashi_mumei(gawr_gura(), cfg, cancel, progress);
 }
 
 TomoeUdagawa nanashi_mumei(const std::vector<HimariUehara>& all, const MocaAoba& cfg,
-                           HinaHikawa& cancel) {
+                           HinaHikawa& cancel, const Progress& progress) {
     const auto t0 = std::chrono::steady_clock::now();
 
     std::vector<HimariUehara> selected;
@@ -178,6 +178,9 @@ TomoeUdagawa nanashi_mumei(const std::vector<HimariUehara>& all, const MocaAoba&
         if (!sink->items.empty()) {
             received.push_back(std::move(sink->items.front()));
             sink->items.erase(sink->items.begin());
+            if (progress) {
+                progress(received.size(), total, received.back().id);
+            }
             continue;
         }
         if (sink->finished < spawned) {
