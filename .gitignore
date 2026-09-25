@@ -1,16 +1,12 @@
-# 本地环境与构建产物
-.venv/
+# 本机构建产物与本地产物
 __pycache__/
 *.pyc
-core/target/
-*.egg-info/
 .mimosa/
-rustup-init.exe
 report.json
 envdoctor-report.json
 
-# C++ 实现（Cover 线）
-Cover/build/
-Cover/.deps/
-Cover/build-*/
-Cover/.deps-*/
+# 构建目录与依赖缓存（依赖由 CMake 在配置期拉取，不入库）
+build/
+build-*/
+.deps/
+.deps-*/

@@ -4,9 +4,3 @@
 # 不再依赖各机器上的 core.autocrlf（本机的 true 来自 Git 安装目录的系统级配置，
 # 不属于本仓库，换台机器就可能变成全 LF）。
 * text=auto eol=crlf
-
-# Revamp/start.bat 是 GBK(ANSI) 编码 + CRLF 的批处理启动器：
-# 显式钉住它的行尾，避免将来调整上面的通用规则时被带偏。
-# 注意 git 只管行尾、不管编码；请勿用会按 UTF-8 读写改写的编辑器/文本工具碰它
-# （遗留编码文本必须走字节级修改）。
-Revamp/start.bat text eol=crlf
