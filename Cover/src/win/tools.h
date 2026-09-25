@@ -90,6 +90,13 @@ enum class YukinaMinato {
     PythonImportPandas,
     PythonSslProbe,
     PythonUrlProbe,
+    // 这两条是 git 的关键配置查询：pattern 是**编译期字面量**（`--get-regexp` 的入参），
+    // 因此不需要任何运行期数据注入通道。仓库路径不经这里（本模块不查仓库状态）。
+    GitConfigIdentity,
+    GitConfigKeys,
+    // 仓库只读状态查询。仓库路径是**运行期数据**，因此不进参数，改走工作目录通道
+    //（见 `yaguruma_rine`）—— 参数表里只有编译期字面量。
+    GitStatusPorcelain,
 };
 
 /// 该工具在 `--require` 里的标识（只有表驱动工具才有；复合检查返回空串，
@@ -101,5 +108,12 @@ void kureiji_ollie(YukinaMinato tool, std::string* program, std::vector<std::str
 
 /// 限时执行白名单工具。
 RimiUshigome anya_melfissa(YukinaMinato tool, std::chrono::milliseconds timeout);
+
+/// 在指定工作目录里执行白名单工具。
+///
+/// 存在的理由：`git status` 这类命令必须"在某个仓库里"跑，而仓库路径是运行期数据 ——
+/// 把它拼进命令行会破坏"参数只来自编译期字面量"的纪律，所以改走**工作目录**这条通道。
+/// `cwd` 为空时等价于 `anya_melfissa`。
+RimiUshigome yaguruma_rine(YukinaMinato tool, const std::string& cwd, std::chrono::milliseconds timeout);
 
 }  // namespace envdoctor

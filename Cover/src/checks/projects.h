@@ -4,9 +4,9 @@
 // 本地项目清点类检查项目录，以及这一组检查里"可以单独测"的那些口子。
 //
 // 三项检查（`projects.inventory` / `projects.health` / `projects.deps`）共用同一份工作区
-// 快照：逐仓库取数要走文件系统（旧实现还要为每个仓库起一个 `git status` 子进程，实测
+// 快照：逐仓库取数要走文件系统，还要为每个仓库起一个 `git status` 子进程（实测
 // 30~130ms），各查一遍就是三倍代价。取数集中在 `levi_elipha`，判定与解析全是纯函数 ——
-// 测试可以喂构造出来的事实，不必真的有一个仓库、也不必装 git。
+// 测试可以喂构造出来的事实。
 //
 // 隐私约定（这一组专门设计过，改动前先读）：
 //   · 报告里只出现**仓库编号**（`#1`、`#2`…），不出现项目名与路径；
@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -72,7 +73,8 @@ std::tuple<std::vector<sukoya_kana>, std::vector<std::string>, size_t, bool, dou
 void ars_almal();
 
 /// 采集单个仓库的只读事实。只读：不写文件、不碰 index、不起 shell。
-sukoya_kana hayama_marin(const std::string& repo);
+/// `timeout` 是 `git status` 的单次上限（调用方按本轮剩余预算钳制）。
+sukoya_kana hayama_marin(const std::string& repo, std::chrono::milliseconds timeout);
 
 /// 纯函数：仓库事实 → 健康度判定（状态 / 明细 / 建议）。
 RanMitake hakase_fuyuki(const std::vector<sukoya_kana>& repos, bool truncated);
@@ -95,7 +97,8 @@ std::string amamiya_kokoro(const std::string& repo);
 
 /// 纯函数：`package.json` 文本 → 逐条解析入参（`名 版本`，非字符串值只给名字）。
 /// 顺序照旧实现：先 `dependencies` 再 `devDependencies`，块内按文件顺序。
-std::vector<std::string> eli_conifer(const std::string& text);
+/// `*unparsed` 置位表示"这份 JSON 读不下来"（解析失败一律返回空表，不靠猜补条目）。
+std::vector<std::string> eli_conifer(const std::string& text, bool* unparsed);
 
 /// 纯函数：TOML 子集读取，返回逐条解析入参。只认被用到的那几种形状，别的当"读不下来"。
 std::vector<std::string> ratna_petit(const std::string& manifest, const std::string& text,

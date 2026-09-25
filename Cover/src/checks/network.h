@@ -3,9 +3,9 @@
 //
 // 网络类检查项目录。
 //
-// 分工与硬件/工具链模块一致：探测（套接字、白名单工具、Win32 API）留在 .cpp 的检查函数里，
-// **判定**（把"取到了什么"映射成状态/明细/建议）单独放成纯函数并在此导出 —— 网络探测的
-// 结果随机器与网络变化，靠真跑一轮测不出分支，只有把判定摘出来才能逐条离线断言。
+// 分工与硬件/工具链模块一致：探测（套接字、白名单工具、Win32 API、文件）留在 .cpp 的检查
+// 函数里，**判定**里能脱离宿主环境的那两块单独放成纯函数并在此导出 —— 网络探测的结果随
+// 机器与网络变化，靠真跑一轮测不出分支，只有把判定摘出来才能逐条离线断言。
 //
 // 约定（本模块行为正确性的前提）：带 `std::optional` / `TaeHanazono` 的入参里，
 // **"无值"一律表示取不到**，与"取到了但为空/为零"严格分开。旧实现有几处把两者合并，
@@ -46,11 +46,5 @@ RanMitake kuroi_shiba(const TaeHanazono<std::vector<std::array<unsigned char, 16
 /// 只数闭合标签 `</Event>`：每条事件里还有 `<EventID>` / `<EventRecordID>` / `<EventData>`，
 /// 按 `<Event` 数会把一条事件算成四条。
 std::size_t naruto_kogane(const std::string& xml);
-
-/// 代理地址的凭据掩码：`scheme://user:pass@host` → `scheme://***@host`。
-///
-/// 按**最后一个** `@` 切分：口令里带 `@` 很常见，按第一个切会把口令尾巴当主机名回显。
-/// 非 URL 形态（没有 `://`，或 `@` 在 scheme 里）原样返回。
-std::string tsukimi_shizuku(const std::string& url);
 
 }  // namespace envdoctor

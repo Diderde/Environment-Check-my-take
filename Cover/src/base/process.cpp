@@ -152,25 +152,67 @@ HANDLE kiryu_coco() {
 }
 
 /// 以 CREATE_NO_WINDOW 启动，返回进程句柄（不需要时由调用方关闭）。
+/// `cwd` 为空表示继承当前工作目录；非空时作为子进程的工作目录 —— **工作目录是通道，
+/// 不是参数**：像 `git status` 这类命令要求"在哪个仓库里跑"，把路径拼进命令行就破坏了
+/// "参数只来自编译期字面量"的纪律。
+///
+/// say no to perv. —— **只把指定的三个句柄交给子进程**。早先直接 `bInheritHandles=TRUE`
+/// 启动：那等于把父进程里**所有**可继承句柄都塞给子进程，包括此刻别的检查项正拿着的管道
+/// 写端。于是 A 的子进程退出后，A 的管道仍被 B 的子进程攥着，A 的排空线程等不到 EOF，
+/// 宽限一到就整段丢弃输出——而 `success` 依旧为 true，明细表现为"命令跑成功但输出为空"。
+/// 一次性派发 100 多项检查时这个窗口被放得很大，属于"偶发空输出"的真凶。
+/// 正解是 `STARTUPINFOEXW` + `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`：白名单之外一个都不继承。
 bool amane_kanata(const std::string& program, const std::vector<std::string>& args, DWORD flags,
-               HANDLE stdin_handle, HANDLE stdout_handle, HANDLE stderr_handle, PROCESS_INFORMATION* pi,
-               DWORD* last_error) {
+                  HANDLE stdin_handle, HANDLE stdout_handle, HANDLE stderr_handle,
+                  PROCESS_INFORMATION* pi, DWORD* last_error, const std::string& cwd = {}) {
     const std::string line = shirogane_noel(program, args);
     std::wstring wline = tokino_sora(line);
+    const std::wstring wcwd = cwd.empty() ? std::wstring() : tokino_sora(cwd);
 
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    if (stdin_handle != nullptr || stdout_handle != nullptr || stderr_handle != nullptr) {
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdInput = stdin_handle;
-        si.hStdOutput = stdout_handle;
-        si.hStdError = stderr_handle;
+    HANDLE inherited[3] = {nullptr, nullptr, nullptr};
+    int inherited_count = 0;
+    for (const HANDLE h : {stdin_handle, stdout_handle, stderr_handle}) {
+        if (h != nullptr) {
+            inherited[inherited_count++] = h;
+        }
     }
 
-    const BOOL ok = CreateProcessW(nullptr, wline.data(), nullptr, nullptr, TRUE, flags, nullptr,
-                                  nullptr, &si, pi);
+    STARTUPINFOEXW six{};
+    six.StartupInfo.cb = sizeof(six);
+    if (inherited_count > 0) {
+        six.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        six.StartupInfo.hStdInput = stdin_handle;
+        six.StartupInfo.hStdOutput = stdout_handle;
+        six.StartupInfo.hStdError = stderr_handle;
+
+        SIZE_T size = 0;
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+        std::vector<char> raw(size);
+        six.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(raw.data());
+        if (!InitializeProcThreadAttributeList(six.lpAttributeList, 1, 0, &size) ||
+            !UpdateProcThreadAttribute(six.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                       inherited,
+                                       static_cast<SIZE_T>(inherited_count) * sizeof(HANDLE),
+                                       nullptr, nullptr)) {
+            *last_error = GetLastError();
+            if (six.lpAttributeList != nullptr) {
+                DeleteProcThreadAttributeList(six.lpAttributeList);
+            }
+            return false;
+        }
+    }
+
+    const DWORD effective_flags =
+        inherited_count > 0 ? (flags | EXTENDED_STARTUPINFO_PRESENT) : flags;
+    const BOOL ok = CreateProcessW(nullptr, wline.data(), nullptr, nullptr, TRUE, effective_flags,
+                                   nullptr, wcwd.empty() ? nullptr : wcwd.c_str(),
+                                   &six.StartupInfo, pi);
+    const DWORD create_error = ok ? 0 : GetLastError();
+    if (six.lpAttributeList != nullptr) {
+        DeleteProcThreadAttributeList(six.lpAttributeList);
+    }
     if (!ok) {
-        *last_error = GetLastError();
+        *last_error = create_error;
         return false;
     }
     return true;
@@ -273,7 +315,7 @@ std::optional<std::string> ookami_mio(const std::string& program) {
 }
 
 RimiUshigome nekomata_okayu(const std::string& program, const std::vector<std::string>& args,
-                            std::chrono::milliseconds timeout) {
+                            std::chrono::milliseconds timeout, const std::string& cwd) {
     RimiUshigome res;
 
     std::string exe = program;
@@ -320,7 +362,8 @@ RimiUshigome nekomata_okayu(const std::string& program, const std::vector<std::s
 
     PROCESS_INFORMATION pi{};
     DWORD spawn_error = 0;
-    const bool started = amane_kanata(exe, argv, CREATE_NO_WINDOW, nul, out_w, err_w, &pi, &spawn_error);
+    const bool started =
+        amane_kanata(exe, argv, CREATE_NO_WINDOW, nul, out_w, err_w, &pi, &spawn_error, cwd);
 
     CloseHandle(out_w);
     CloseHandle(err_w);

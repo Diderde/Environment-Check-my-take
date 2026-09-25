@@ -3,11 +3,36 @@ name: ci
 on:
   push:
     branches: [main]
-    paths: ["Revamp/**", ".github/workflows/**"]
+    paths: ["Revamp/**", "Cover/**", ".github/workflows/**"]
   pull_request:
-    paths: ["Revamp/**", ".github/workflows/**"]
+    paths: ["Revamp/**", "Cover/**", ".github/workflows/**"]
 
 jobs:
+  cpp:
+    name: C++ 实现（Cover，构建 + 单元测试）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 依赖（fmt / doctest，以及开了前端时的 ftxui / Dear ImGui / WIL）由 CMake FetchContent
+      # 现场拉取，版本在 Cover/CMakeLists.txt 里钉死，仓库里不存源码副本。
+      - name: 配置（含前端）
+        run: cmake -S Cover -B Cover/build-ci -G "Visual Studio 17 2022" -A x64 -DENVDECTOR_WITH_UI=ON
+      - name: 构建
+        run: cmake --build Cover/build-ci --config Release
+      - name: 单元测试
+        run: Cover/build-ci/Release/envdoctor_tests.exe
+      - name: 命令行冒烟（版本、检查项清单、未知类别退出码）
+        shell: pwsh
+        run: |
+          $exe = "Cover/build-ci/Release/envdoctor.exe"
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "--version 应退出 0" }
+          $rows = & $exe --list-checks
+          if ($LASTEXITCODE -ne 0) { throw "--list-checks 应退出 0" }
+          if ($rows.Count -lt 100) { throw "检查项数量异常：$($rows.Count)" }
+          & $exe -c nosuchcategory
+          if ($LASTEXITCODE -ne 2) { throw "未知类别应退出 2，实际 $LASTEXITCODE" }
+
   rust:
     name: Rust 核心（test + clippy）
     runs-on: windows-latest

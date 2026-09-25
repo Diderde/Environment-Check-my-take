@@ -378,10 +378,10 @@ std::vector<HimariUehara> ienaga_mugi() {
         HimariUehara{"nvcc", "CUDA (nvcc)", "toolchains", {}, &izumo_kasumi<YukinaMinato::Nvcc>},
         HimariUehara{"vswhere", "VS Build Tools (vswhere)", "toolchains", {"windows"},
                      &izumo_kasumi<YukinaMinato::Vswhere>},
-        HimariUehara{"msvc", "MSVC C++ 工具集", "toolchains", {"windows"}, takamiya_rion},
         HimariUehara{"kubectl", "kubectl", "toolchains", {},
                      &izumo_kasumi<YukinaMinato::Kubectl>},
         HimariUehara{"ffmpeg", "FFmpeg", "toolchains", {}, &izumo_kasumi<YukinaMinato::Ffmpeg>},
+        HimariUehara{"msvc", "MSVC C++ 工具集", "toolchains", {"windows"}, takamiya_rion},
         HimariUehara{"toolchains.pkg_mgr", "包管理器", "toolchains", {}, asuka_hina},
     };
 }

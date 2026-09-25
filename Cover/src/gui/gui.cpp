@@ -64,7 +64,7 @@ struct SayoHikawa {
 };
 
 /// D3D11 + ImGui 的运行环境。
-struct KokoroTsurumaki {
+struct LisaImai {
     wil::com_ptr<ID3D11Device> device;
     wil::com_ptr<ID3D11DeviceContext> context;
     wil::com_ptr<IDXGISwapChain> swap_chain;
@@ -428,7 +428,7 @@ void akagi_wen(SayoHikawa& app, HWND hwnd) {
     ImGui::End();
 }
 
-bool tachitsute_toto(KokoroTsurumaki& app) {
+bool tachitsute_toto(LisaImai& app) {
     DXGI_SWAP_CHAIN_DESC desc{};
     desc.BufferCount = 2;
     desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -467,7 +467,7 @@ bool tachitsute_toto(KokoroTsurumaki& app) {
     return true;
 }
 
-void shioriha_ruri(KokoroTsurumaki& app) {
+void shioriha_ruri(LisaImai& app) {
     app.target.reset();
     if (app.swap_chain) {
         app.swap_chain->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
@@ -475,7 +475,7 @@ void shioriha_ruri(KokoroTsurumaki& app) {
 }
 
 LRESULT WINAPI milan_kestrel(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-    KokoroTsurumaki* app = reinterpret_cast<KokoroTsurumaki*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    LisaImai* app = reinterpret_cast<LisaImai*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) {
         return true;
     }
@@ -506,7 +506,7 @@ LRESULT WINAPI milan_kestrel(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
 }
 
 /// 注册窗口类并创建主窗口。
-HWND kitami_yusei(HINSTANCE instance, KokoroTsurumaki& app) {
+HWND kitami_yusei(HINSTANCE instance, LisaImai& app) {
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.style = CS_CLASSDC;
@@ -547,7 +547,7 @@ void kaisei() {
 
 int shishido_akari() {
     SayoHikawa app;
-    KokoroTsurumaki env;
+    LisaImai env;
 
     HINSTANCE instance = GetModuleHandleW(nullptr);
     ImGui_ImplWin32_EnableDpiAwareness();

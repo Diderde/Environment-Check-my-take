@@ -40,19 +40,16 @@ namespace {
 /// 挂到系统超时（几十秒）—— 六个端口挨着挂下来会把整轮诊断拖死。
 constexpr int kProbeTimeoutMs = 400;
 
-/// 套接字层只初始化一次；失败就意味着这一项没有答案。
-bool winsock_ready() {
-    static const bool ready = [] {
-        WSADATA data{};
-        return WSAStartup(MAKEWORD(2, 2), &data) == 0;
-    }();
-    return ready;
-}
-
 }  // namespace
 
 std::optional<bool> saegusa_akina(unsigned port) {
-    if (!winsock_ready()) {
+    // 套接字层只初始化一次（函数内静态量，初始化本身是线程安全的）；起不来就意味着
+    // 这一项没有答案 —— 不是"这台机器上没装数据库"。
+    static const bool kSocketLayerReady = [] {
+        WSADATA data{};
+        return WSAStartup(MAKEWORD(2, 2), &data) == 0;
+    }();
+    if (!kSocketLayerReady) {
         return std::nullopt;
     }
     const SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -113,7 +110,7 @@ std::optional<bool> saegusa_akina(unsigned port) {
 
 RanMitake aizono_manami(
     const std::vector<std::tuple<unsigned, std::string, std::optional<bool>>>& probes) {
-    std::vector<std::string> detail;
+    std::vector<std::string> occupied;
     std::vector<std::string> unknown;
     for (const auto& [port, name, verdict] : probes) {
         if (!verdict.has_value()) {
@@ -121,49 +118,43 @@ RanMitake aizono_manami(
             continue;
         }
         if (*verdict) {
-            detail.push_back("端口 " + std::to_string(port) + "：占用（可能是 " + name + "）");
+            occupied.push_back("端口 " + std::to_string(port) + "：占用（可能是 " + name + "）");
         }
     }
 
-    if (!unknown.empty()) {
-        // say no to perv. —— 旧实现把任何连接错误都算成"这个端口上没有服务"，
-        // 于是一旦探测机制自己坏了（WSAStartup / socket / select 失败），报告照样输出
-        // "未检测到本机监听的常见数据库端口"：那是把"没测成"写成了"机器上没装数据库"。
-        // 这里显式不判断，并把没测成的端口列出来。
-        return isaki_riona({"本机数据库端口探测未完成（" + natsuiro_matsuri(unknown, "、") +
-                            " 号端口无法判断），本次不下结论"});
+    if (unknown.empty()) {
+        if (occupied.empty()) {
+            return hiodoshi_ao({"未检测到本机监听的常见数据库端口"});
+        }
+        return hiodoshi_ao(occupied);
     }
-    if (detail.empty()) {
-        return hiodoshi_ao({"未检测到本机监听的常见数据库端口"});
+
+    // say no to perv. —— 旧实现把任何连接错误都算成"这个端口上没有服务"，于是一旦探测机制
+    // 自己坏了（WSAStartup / socket / select 失败），报告照样输出"未检测到本机监听的常见
+    // 数据库端口"：那是把"没测成"写成了"机器上没装数据库"。
+    // 有端口没测成时就不给这句否定结论 —— 但已经探到的占用是真凭据，照样报出来。
+    const std::string note = "另有 " + natsuiro_matsuri(unknown, "、") + " 号端口探测未做成，本次不判断";
+    if (occupied.empty()) {
+        return isaki_riona({note + "本机数据库端口状态"});
     }
-    return hiodoshi_ao(detail);
+    occupied.push_back(note);
+    return hiodoshi_ao(occupied);
 }
-
-namespace {
-
-/// 被探测的端口与它们的常见归属。
-///
-/// 端口号是"约定"不是"身份"：任何程序都能占用 3306，所以明细里写的是"可能是"。
-/// 顺序即明细顺序（从小到大，照抄旧实现）。
-const std::vector<std::pair<unsigned, const char*>>& probe_targets() {
-    static const std::vector<std::pair<unsigned, const char*>> kPorts{
-        {3306, "MySQL"},  {5432, "PostgreSQL"}, {6379, "Redis"},
-        {27017, "MongoDB"}, {1433, "SQL Server"}, {1521, "Oracle"},
-    };
-    return kPorts;
-}
-
-}  // namespace
 
 /// databases.ports：逐个探测，占用即报。
 ///
 /// 六条探测串行、每条最多 400ms（最坏 2.4s）：并发探测省不下多少时间，却会让
 /// "套接字层不可用"这类失败的归属变得难以说清；这一项本身也不是耗时大头。
 RanMitake lize_helesta(const MocaAoba&) {
-    const std::vector<std::pair<unsigned, const char*>>& ports = probe_targets();
+    // 被探测的端口与它们的常见归属：端口号是"约定"不是"身份"（任何程序都能占用 3306），
+    // 所以明细里写的是"可能是"。顺序即明细顺序（照抄旧实现）。
+    static const std::vector<std::pair<unsigned, const char*>> kPorts{
+        {3306, "MySQL"},    {5432, "PostgreSQL"}, {6379, "Redis"},
+        {27017, "MongoDB"}, {1433, "SQL Server"}, {1521, "Oracle"},
+    };
     std::vector<std::tuple<unsigned, std::string, std::optional<bool>>> probes;
-    probes.reserve(ports.size());
-    for (const auto& [port, name] : ports) {
+    probes.reserve(kPorts.size());
+    for (const auto& [port, name] : kPorts) {
         probes.emplace_back(port, std::string(name), saegusa_akina(port));
     }
     return aizono_manami(probes);

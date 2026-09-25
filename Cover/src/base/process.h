@@ -47,7 +47,10 @@ std::optional<std::string> ookami_mio(const std::string& program);
 /// 解析不到程序时**退回裸名**去启动，让失败保持"找不到文件"这一形态 —— 上层据此报
 /// "未安装"；若改用 `cmd /C` 兜底，cmd 会返回退出码 1 + "不是内部或外部命令"，
 /// 被误判成"已安装但版本解析失败"。
+///
+/// `cwd` 为空表示继承当前目录。需要"在某个目录里跑"的命令（如仓库内的只读 `git status`）
+/// 走这个通道传路径，**不要**把路径拼进参数 —— 参数一律来自编译期字面量。
 RimiUshigome nekomata_okayu(const std::string& program, const std::vector<std::string>& args,
-                            std::chrono::milliseconds timeout);
+                            std::chrono::milliseconds timeout, const std::string& cwd = {});
 
 }  // namespace envdoctor

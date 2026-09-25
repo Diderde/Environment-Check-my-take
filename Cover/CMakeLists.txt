@@ -113,9 +113,11 @@ target_link_libraries(envdoctor
 enable_testing()
 add_test(NAME base COMMAND envdoctor_tests)
 
-# 前端（TUI/GUI）。默认关闭：它要额外拉取三个依赖，日常改检查项时不必付这份代价；
-# 出正式产物时用 -DENVDECTOR_WITH_UI=ON（发布构建即为默认打开）。
-option(ENVDECTOR_WITH_UI "构建 TUI/GUI 前端（拉取 ftxui / Dear ImGui / WIL）" OFF)
+# 前端（TUI/GUI）。**默认打开**：`tui` / `gui` 是产品的一部分，缺了它们这个程序就不完整
+#（`envdoctor tui` 会明确报"未纳入本次构建"并退 2，而不是静默降级）。
+# 它会额外拉取三个依赖（ftxui / Dear ImGui / WIL）；只想快速迭代检查项时可以
+# `-DENVDECTOR_WITH_UI=OFF` 关掉，构建与命令行功能不受影响。
+option(ENVDECTOR_WITH_UI "构建 TUI/GUI 前端（拉取 ftxui / Dear ImGui / WIL）" ON)
 
 if(ENVDECTOR_WITH_UI)
   set(FTXUI_BUILD_DOCS OFF CACHE BOOL "" FORCE)
@@ -181,4 +183,9 @@ if(ENVDECTOR_WITH_UI)
     PRIVATE ftxui::screen ftxui::dom ftxui::component envdoctor_imgui
     PRIVATE user32 gdi32 comdlg32
     PRIVATE envdoctor_flags)
+
+  # 命令行层要能进两个前端：把 UI 库挂上去，并把开关作为宏传给它
+  #（没开前端时 cli.cpp 里的分支会明确拒绝对应子命令，而不是假装跑过）。
+  target_link_libraries(envdoctor_cli PUBLIC envdoctor_ui)
+  target_compile_definitions(envdoctor_cli PRIVATE ENVDECTOR_WITH_UI=1)
 endif()
