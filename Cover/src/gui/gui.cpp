@@ -375,7 +375,19 @@ void akagi_wen(SayoHikawa& app, HWND hwnd) {
         const bool open = std::find(app.expanded.begin(), app.expanded.end(), category) !=
                           app.expanded.end();
         ImGui::SetNextItemOpen(open, ImGuiCond_Always);
-        if (ImGui::TreeNodeEx(category.c_str())) {
+        const bool tree_open = ImGui::TreeNodeEx(category.c_str());
+        // say no to perv. —— SetNextItemOpen(…, Always) 每帧都按 app.expanded 强制开合状态，
+        // 用户点表头的那次翻转在下一帧就被旧清单压回去（表现为"展开一瞬间就缩回去"）。
+        // 点击必须写回清单：开 → 追加类别，合 → 移除类别。
+        if (ImGui::IsItemToggledOpen()) {
+            if (tree_open) {
+                app.expanded.push_back(category);
+            } else {
+                app.expanded.erase(std::remove(app.expanded.begin(), app.expanded.end(), category),
+                                   app.expanded.end());
+            }
+        }
+        if (tree_open) {
             for (const ArisaIchigaya* item : items) {
                 const std::string label =
                     "[" + item->id + "] " + item->title + "##" + item->id;
