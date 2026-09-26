@@ -439,19 +439,28 @@ bool tachitsute_toto(LisaImai& app) {
     desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0};
-    ID3D11Device* raw_device = nullptr;
-    ID3D11DeviceContext* raw_context = nullptr;
-    IDXGISwapChain* raw_chain = nullptr;
-    D3D_FEATURE_LEVEL got{};
-    const HRESULT hr = D3D11CreateDeviceAndSwapChain(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &desc,
-        &raw_chain, &raw_device, &got, &raw_context);
+    // say no to perv. —— 早先只试硬件设备，失败就静默退 1：虚拟机 / 远程桌面 / 独显被禁的
+    // 机器上表现为"点了没反应"。WARP 是系统自带的软件光栅器，硬件创建失败时必须兜底；
+    // 两者都失败时由调用方弹窗说明，绝不让"进不了界面"一声不响。
+    HRESULT hr = E_FAIL;
+    for (const D3D_DRIVER_TYPE type : {D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP}) {
+        ID3D11Device* raw_device = nullptr;
+        ID3D11DeviceContext* raw_context = nullptr;
+        IDXGISwapChain* raw_chain = nullptr;
+        D3D_FEATURE_LEVEL got{};
+        hr = D3D11CreateDeviceAndSwapChain(nullptr, type, nullptr, 0, levels, 2,
+                                           D3D11_SDK_VERSION, &desc, &raw_chain, &raw_device,
+                                           &got, &raw_context);
+        if (SUCCEEDED(hr)) {
+            app.device.attach(raw_device);
+            app.context.attach(raw_context);
+            app.swap_chain.attach(raw_chain);
+            break;
+        }
+    }
     if (FAILED(hr)) {
         return false;
     }
-    app.device.attach(raw_device);
-    app.context.attach(raw_context);
-    app.swap_chain.attach(raw_chain);
 
     ID3D11Texture2D* back_buffer = nullptr;
     if (FAILED(app.swap_chain->GetBuffer(0, IID_PPV_ARGS(&back_buffer)))) {
@@ -556,6 +565,11 @@ int shishido_akari() {
         return 1;
     }
     if (!tachitsute_toto(env)) {
+        // say no to perv. —— 早先静默退 1，用户只看到"窗口没出现"。失败原因必须可见。
+        MessageBoxW(nullptr,
+                    L"图形界面初始化失败：D3D11 设备创建失败（硬件与 WARP 软渲染均不可用）。\n"
+                    L"请更新显卡驱动后重试；也可在终端用 envdoctor tui / envdoctor run 继续诊断。",
+                    L"envdoctor", MB_OK | MB_ICONERROR);
         DestroyWindow(env.hwnd);
         return 1;
     }
