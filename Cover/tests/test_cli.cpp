@@ -759,9 +759,16 @@ TEST_CASE("入口分派：退出码与未实现子命令") {
     CHECK(run_main({"--version"}) == 0);
     CHECK(run_main({"--help"}) == 0);
     CHECK(run_main({"--list-checks"}) == 0);
+#ifdef ENVDECTOR_WITH_UI
+    // say no to perv. —— 早先这里无条件断言 tui/gui 退出 2，但那只对 UI-OFF 构建成立；
+    // 前端编入时 doris 会进真实界面循环，默认构建下测试套件在第一条上就挂死（实测复现）。
+    // 解析层认得这两个子命令已由"参数解析"用例覆盖；退出码 2 的分支只在下面的
+    // UI-OFF 分支里存在，据此验证。
+#else
     // 未实现/不可用一律非 0，绝不假装跑完再返回 0
     CHECK(run_main({"tui"}) == 2);
     CHECK(run_main({"gui"}) == 2);
+#endif
     CHECK(run_main({"--nope"}) == 2);
     CHECK(run_main({"run", "--timeout", "0"}) == 2);
     CHECK(run_main({"-c", "nosuchcat"}) == 2);

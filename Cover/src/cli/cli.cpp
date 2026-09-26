@@ -756,7 +756,9 @@ int utsugi_uyu(const Rosalyn& opts) {
         kishido_temma(warning, true, kColorWarn, color_err);
     }
 
-    kishido_temma("正在运行诊断（系统类检查由 Rust 核心并发执行）…", false, kColorDim, color_out);
+    // say no to perv. —— 文案沿用了上一版，但"由 Rust 核心并发执行"陈述的事实已随
+    // 单进程 C++ 实现失效；界面文案必须陈述当前形态（引擎一检查一线程并发）。
+    kishido_temma("正在运行诊断（检查项并发执行，每项一线程）…", false, kColorDim, color_out);
 
     // 进度只在终端上有：旧实现同样是 `stdout.isatty()` 才装回调（重定向时连回调都不注册），
     // 所以"-c ... > log"这类用法拿到的字节与没有进度时完全一致。
