@@ -42,7 +42,7 @@ rem console, choice fails and errorlevel is 255, which the first check turns int
 rem exit instead of a spin.
 choice /c 123450 /n /m "Choose: "
 if errorlevel 6 goto bye
-if errorlevel 5 goto build
+if errorlevel 5 goto build_ui
 if errorlevel 4 goto run_list
 if errorlevel 3 goto run_cli
 if errorlevel 2 goto run_tui
@@ -114,15 +114,19 @@ echo.
 choice /c 120 /n /m "Choose: "
 if errorlevel 3 goto bye
 if errorlevel 2 goto build_cli_only
-if errorlevel 1 goto build
+if errorlevel 1 goto build_ui
 goto bye
+
+:build_ui
+rem Clear UIFLAG here, NOT in :build: the CLI-only path jumps into :build with it set.
+set "UIFLAG="
+goto build
 
 :build_cli_only
 set "UIFLAG=-DENVDECTOR_WITH_UI=OFF"
 goto build
 
 :build
-set "UIFLAG="
 set "CMAKE="
 where cmake >nul 2>nul
 if not errorlevel 1 set "CMAKE=cmake"

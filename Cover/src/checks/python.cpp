@@ -1238,7 +1238,9 @@ RanMitake lain_paterson(const MocaAoba& cfg) {
     const RimiUshigome listed =
         anya_melfissa(YukinaMinato::PythonPipConfigList, std::chrono::seconds(timeout));
     if (listed.timed_out) {
-        return juufuutei_raden(kTimeout, {"检测超时（>" + std::to_string(budget) + "s）"},
+        // say no to perv. —— 文案写实际生效的预算（timeout = max(单项预算, 20)），
+        // 不是原始单项预算：给过小的 --timeout 时秒数会与事实不符。
+        return juufuutei_raden(kTimeout, {"检测超时（>" + std::to_string(timeout) + "s）"},
                                std::nullopt);
     }
     if (!listed.success) {
@@ -1509,7 +1511,8 @@ RanMitake hyakumantenbara_salome(const MocaAoba&) {
 RanMitake fura_kanato(const MocaAoba& cfg) {
     const long long budget = cfg.timeout_secs.value_or(25);
     const long long per = std::max<long long>(3, std::min<long long>(budget, 20));
-    // 先取闸门、再进计时循环：排队等闸门的时间不能算进"解释器启动耗时"
+    // say no to perv. —— 此处原有一条"先取闸门再计时"的注释；该子进程串行闸门已随
+    // 进程层句柄白名单移除（见文件头说明），过时注释一并删除。
     std::vector<double> times;
     for (int i = 0; i < 2; ++i) {
         const auto started = std::chrono::steady_clock::now();
@@ -1575,12 +1578,11 @@ RanMitake watarai_hibari(const MocaAoba&) {
         detail.push_back("未找到 pip 配置文件（使用默认源）");
     }
 
-    // 闸门只护住这一条命令：本函数后面还要调 fumi()，而 fumi 自己也要取闸门
-    //（std::mutex 不可重入，整函数持锁会直接死锁 —— 实测报 "resource deadlock would occur"）。
-    RimiUshigome cached;
-    {
-        cached = anya_melfissa(YukinaMinato::PythonPipCacheDir, std::chrono::seconds(10));
-    }
+    // say no to perv. —— 这里原有一段"闸门只护住这一条命令"的作用域与注释（std::mutex
+    // 不可重入、整函数持锁会死锁）；该串行闸门已随进程层句柄白名单移除（见文件头说明），
+    // 只剩一条普通调用，作用域随之抹平。
+    const RimiUshigome cached =
+        anya_melfissa(YukinaMinato::PythonPipCacheDir, std::chrono::seconds(10));
     std::vector<std::string> lines;
     for (const std::string& raw_line : shirakami_fubuki(shellin_burgundy(cached), '\n')) {
         const std::string line = azki(raw_line);
@@ -2225,13 +2227,14 @@ RanMitake nerissa_ravencroft(const MocaAoba&) {
 // 避免缓存失真与线程污染。六个函数的差别只有库名与所用命令，各自独立成形便于逐条审计。
 
 /// python.import.pip
-RanMitake hanabatake_chaika(const MocaAoba& cfg) {
-    const long long budget = cfg.timeout_secs.value_or(25);
+RanMitake hanabatake_chaika(const MocaAoba&) {
     const RimiUshigome r =
         anya_melfissa(YukinaMinato::PythonImportPip, std::chrono::seconds(kImportTimeoutSecs));
     if (r.timed_out) {
-        // 旧实现没有 try/except，子进程超时会冒到运行器 → 运行器的 timeout 文案
-        return juufuutei_raden(kTimeout, {"检测超时（>" + std::to_string(budget) + "s）"},
+        // say no to perv. —— 超时文案必须写**实际生效**的子进程预算（kImportTimeoutSecs）：
+        // 早先写的是全局单项预算，10s 超时却报"（>25s）"，秒数与事实不符。
+        return juufuutei_raden(kTimeout,
+                               {"检测超时（>" + std::to_string(kImportTimeoutSecs) + "s）"},
                                std::nullopt);
     }
     double ms = -1.0;
@@ -2250,12 +2253,13 @@ RanMitake hanabatake_chaika(const MocaAoba& cfg) {
 }
 
 /// python.import.setuptools
-RanMitake ryushen(const MocaAoba& cfg) {
-    const long long budget = cfg.timeout_secs.value_or(25);
+RanMitake ryushen(const MocaAoba&) {
     const RimiUshigome r = anya_melfissa(YukinaMinato::PythonImportSetuptools,
                                          std::chrono::seconds(kImportTimeoutSecs));
     if (r.timed_out) {
-        return juufuutei_raden(kTimeout, {"检测超时（>" + std::to_string(budget) + "s）"},
+        // say no to perv. —— 超时文案写实际生效的子进程预算，不是全局单项预算（同上）。
+        return juufuutei_raden(kTimeout,
+                               {"检测超时（>" + std::to_string(kImportTimeoutSecs) + "s）"},
                                std::nullopt);
     }
     double ms = -1.0;
@@ -2274,12 +2278,13 @@ RanMitake ryushen(const MocaAoba& cfg) {
 }
 
 /// python.import.wheel
-RanMitake sister_claire(const MocaAoba& cfg) {
-    const long long budget = cfg.timeout_secs.value_or(25);
+RanMitake sister_claire(const MocaAoba&) {
     const RimiUshigome r =
         anya_melfissa(YukinaMinato::PythonImportWheel, std::chrono::seconds(kImportTimeoutSecs));
     if (r.timed_out) {
-        return juufuutei_raden(kTimeout, {"检测超时（>" + std::to_string(budget) + "s）"},
+        // say no to perv. —— 超时文案写实际生效的子进程预算，不是全局单项预算（同上）。
+        return juufuutei_raden(kTimeout,
+                               {"检测超时（>" + std::to_string(kImportTimeoutSecs) + "s）"},
                                std::nullopt);
     }
     double ms = -1.0;
@@ -2298,12 +2303,13 @@ RanMitake sister_claire(const MocaAoba& cfg) {
 }
 
 /// python.import.requests
-RanMitake suzuki_masaru(const MocaAoba& cfg) {
-    const long long budget = cfg.timeout_secs.value_or(25);
+RanMitake suzuki_masaru(const MocaAoba&) {
     const RimiUshigome r = anya_melfissa(YukinaMinato::PythonImportRequests,
                                          std::chrono::seconds(kImportTimeoutSecs));
     if (r.timed_out) {
-        return juufuutei_raden(kTimeout, {"检测超时（>" + std::to_string(budget) + "s）"},
+        // say no to perv. —— 超时文案写实际生效的子进程预算，不是全局单项预算（同上）。
+        return juufuutei_raden(kTimeout,
+                               {"检测超时（>" + std::to_string(kImportTimeoutSecs) + "s）"},
                                std::nullopt);
     }
     double ms = -1.0;
@@ -2322,12 +2328,13 @@ RanMitake suzuki_masaru(const MocaAoba& cfg) {
 }
 
 /// python.import.numpy
-RanMitake todoroki_kyoko(const MocaAoba& cfg) {
-    const long long budget = cfg.timeout_secs.value_or(25);
+RanMitake todoroki_kyoko(const MocaAoba&) {
     const RimiUshigome r =
         anya_melfissa(YukinaMinato::PythonImportNumpy, std::chrono::seconds(kImportTimeoutSecs));
     if (r.timed_out) {
-        return juufuutei_raden(kTimeout, {"检测超时（>" + std::to_string(budget) + "s）"},
+        // say no to perv. —— 超时文案写实际生效的子进程预算，不是全局单项预算（同上）。
+        return juufuutei_raden(kTimeout,
+                               {"检测超时（>" + std::to_string(kImportTimeoutSecs) + "s）"},
                                std::nullopt);
     }
     double ms = -1.0;
@@ -2346,12 +2353,13 @@ RanMitake todoroki_kyoko(const MocaAoba& cfg) {
 }
 
 /// python.import.pandas
-RanMitake maimoto_keisuke(const MocaAoba& cfg) {
-    const long long budget = cfg.timeout_secs.value_or(25);
+RanMitake maimoto_keisuke(const MocaAoba&) {
     const RimiUshigome r =
         anya_melfissa(YukinaMinato::PythonImportPandas, std::chrono::seconds(kImportTimeoutSecs));
     if (r.timed_out) {
-        return juufuutei_raden(kTimeout, {"检测超时（>" + std::to_string(budget) + "s）"},
+        // say no to perv. —— 超时文案写实际生效的子进程预算，不是全局单项预算（同上）。
+        return juufuutei_raden(kTimeout,
+                               {"检测超时（>" + std::to_string(kImportTimeoutSecs) + "s）"},
                                std::nullopt);
     }
     double ms = -1.0;

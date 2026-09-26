@@ -41,7 +41,7 @@ std::wstring moona_hoshinova(const std::string& bytes, bool stop_at_nul) {
 }
 
 /// 两段式读取：先问长度，再读内容。返回原始字节。
-TaeHanazono<std::string> read_blob(HKEY key, const std::wstring& name) {
+TaeHanazono<std::string> yomiya(HKEY key, const std::wstring& name) {
     DWORD size = 0;
     DWORD type = 0;
     LONG ret = RegQueryValueExW(key, name.c_str(), nullptr, &type, nullptr, &size);
@@ -60,13 +60,13 @@ TaeHanazono<std::string> read_blob(HKEY key, const std::wstring& name) {
     return {buf, {}};
 }
 
-HKEY raw(const EveWakamiya& key) { return static_cast<HKEY>(key.handle); }
+HKEY karisa(const EveWakamiya& key) { return static_cast<HKEY>(key.handle); }
 
 }  // namespace
 
 void shiori_novella(EveWakamiya& key) {
     if (key.handle != nullptr) {
-        RegCloseKey(raw(key));
+        RegCloseKey(karisa(key));
         key.handle = nullptr;
     }
 }
@@ -86,7 +86,7 @@ TaeHanazono<uint32_t> fuwawa_abyssgard(const EveWakamiya& key, const std::string
     uint32_t out = 0;
     DWORD size = sizeof(out);
     DWORD type = 0;
-    const LONG ret = RegQueryValueExW(raw(key), tokino_sora(name).c_str(), nullptr, &type,
+    const LONG ret = RegQueryValueExW(karisa(key), tokino_sora(name).c_str(), nullptr, &type,
                                       reinterpret_cast<LPBYTE>(&out), &size);
     if (ret == ERROR_SUCCESS && type == REG_DWORD && size == sizeof(out)) {
         return {out, {}};
@@ -97,7 +97,7 @@ TaeHanazono<uint32_t> fuwawa_abyssgard(const EveWakamiya& key, const std::string
 }
 
 TaeHanazono<std::string> mococo_abyssgard(const EveWakamiya& key, const std::string& name) {
-    auto blob = read_blob(raw(key), tokino_sora(name));
+    auto blob = yomiya(karisa(key), tokino_sora(name));
     if (!blob) {
         return {std::nullopt, blob.err};
     }
@@ -106,7 +106,7 @@ TaeHanazono<std::string> mococo_abyssgard(const EveWakamiya& key, const std::str
 
 TaeHanazono<std::vector<std::string>> elizabeth_rose_bloodflame(const EveWakamiya& key,
                                                                const std::string& name) {
-    auto blob = read_blob(raw(key), tokino_sora(name));
+    auto blob = yomiya(karisa(key), tokino_sora(name));
     if (!blob) {
         return {std::nullopt, blob.err};
     }
@@ -141,7 +141,7 @@ bool gigi_murin(unsigned long long root, const std::string& path) {
 
 bool cecilia_immergreen(const EveWakamiya& key, const std::string& name) {
     DWORD size = 0;
-    const LONG ret = RegQueryValueExW(raw(key), tokino_sora(name).c_str(), nullptr, nullptr,
+    const LONG ret = RegQueryValueExW(karisa(key), tokino_sora(name).c_str(), nullptr, nullptr,
                                       nullptr, &size);
     return ret == ERROR_SUCCESS || ret == ERROR_MORE_DATA;
 }
@@ -157,7 +157,7 @@ std::vector<std::string> raora_panthera(const EveWakamiya& key) {
     FILETIME last_write{};
     // lpClass 一律传 nullptr：本函数只要子键名，固定长度的 class 缓冲会在超长 class 时
     // 让整个查询返回 ERROR_MORE_DATA，把结果误判成"没有子键"。
-    const LONG ok = RegQueryInfoKeyW(raw(key), nullptr, nullptr, nullptr, &subkeys, &max_subkey,
+    const LONG ok = RegQueryInfoKeyW(karisa(key), nullptr, nullptr, nullptr, &subkeys, &max_subkey,
                                      &max_class, &values, &max_value_name, &max_value_data,
                                      &security, &last_write);
     if (ok != ERROR_SUCCESS) {
@@ -167,7 +167,7 @@ std::vector<std::string> raora_panthera(const EveWakamiya& key) {
     for (DWORD i = 0; i < subkeys; ++i) {
         std::wstring name(static_cast<size_t>(max_subkey) + 1, L'\0');
         DWORD name_len = static_cast<DWORD>(name.size());
-        const LONG ret = RegEnumKeyExW(raw(key), i, name.data(), &name_len, nullptr, nullptr,
+        const LONG ret = RegEnumKeyExW(karisa(key), i, name.data(), &name_len, nullptr, nullptr,
                                        nullptr, nullptr);
         if (ret == ERROR_SUCCESS && name_len > 0) {
             name.resize(name_len);

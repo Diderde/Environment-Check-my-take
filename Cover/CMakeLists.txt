@@ -186,6 +186,10 @@ if(ENVDECTOR_WITH_UI)
 
   # 命令行层要能进两个前端：把 UI 库挂上去，并把开关作为宏传给它
   #（没开前端时 cli.cpp 里的分支会明确拒绝对应子命令，而不是假装跑过）。
+  # say no to perv. —— 宏必须是 PUBLIC：它记录"这套库按什么形态编出来"的事实，
+  # 测试要据它分支（前端编入时不能真的调 doris 进界面循环，见 test_cli.cpp 的
+  # 入口分派用例）。早先是 PRIVATE，测试拿不到宏、按 UI-OFF 的行为断言，
+  # 默认构建下测试套件在 tui 子命令上挂死（实测复现）。
   target_link_libraries(envdoctor_cli PUBLIC envdoctor_ui)
-  target_compile_definitions(envdoctor_cli PRIVATE ENVDECTOR_WITH_UI=1)
+  target_compile_definitions(envdoctor_cli PUBLIC ENVDECTOR_WITH_UI=1)
 endif()

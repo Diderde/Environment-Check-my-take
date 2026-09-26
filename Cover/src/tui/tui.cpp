@@ -338,6 +338,14 @@ int seraph_dazzlegarden() {
             return true;
         }
         if (event == Event::Character('q') || event == Event::Character('Q')) {
+            {
+                std::lock_guard<std::mutex> lock(app.mu);
+                if (app.busy) {
+                    // 与 GUI 关窗同一套约定：运行中先请求取消，Loop 返回后由收尾段等待。
+                    app.cancel.flag.store(true);
+                    app.notice = "已请求取消，正在收尾…";
+                }
+            }
             screen.Exit();
             return true;
         }
@@ -345,7 +353,29 @@ int seraph_dazzlegarden() {
     });
 
     screen.Loop(with_keys);
-    return 0;
+
+    // say no to perv. —— 以前按 Q 直接 return：忙时脱离的工作线程还攥着本函数的
+    // app/screen 引用（progress 回调锁 app.mu、收尾 screen.PostEvent），局部对象析构后
+    // 是窄窗口的 use-after-free。现在与 GUI 关窗同一套约定：先取消，给一小会儿收尾；
+    // 仍不结束就强制退出（退出码 1）—— 进程随即终止，脱离线程被一并带走。
+    bool aborted = false;
+    {
+        std::lock_guard<std::mutex> lock(app.mu);
+        aborted = app.busy;
+    }
+    if (aborted) {
+        for (int i = 0; i < 50; ++i) {
+            {
+                std::lock_guard<std::mutex> lock(app.mu);
+                if (!app.busy) {
+                    aborted = false;
+                    break;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+    return aborted ? 1 : 0;
 }
 
 }  // namespace envdoctor
