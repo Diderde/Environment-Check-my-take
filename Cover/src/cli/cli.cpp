@@ -73,7 +73,8 @@ constexpr const char* kUsage =
     "  -e, --expand <类别>    展开指定类别的明细（可重复；名字不校验，匹配不到就不展开）\n"
     "  -E, --expand-all       展开全部类别明细\n"
     "      --require <工具>   必备工具：缺失记 FAIL（可重复，也可用逗号分隔）\n"
-    "      --timeout <秒>     单项预算秒数（≥1，默认 25；总预算 = 单项预算 × 检查项数）\n"
+    "      --timeout <秒>     单项预算秒数（≥1，默认 25；总预算 = 单项预算 × 检查项数，\n"
+    "                         单项卡死时最多再等一个单项预算即按超时收尾）\n"
     "      --json <文件>      导出 JSON 报告\n"
     "      --txt <文件>       导出 Markdown 报告\n"
     "      --net-full         启用公网 IP 探测（默认关闭，不外发请求）\n"
@@ -779,6 +780,9 @@ int utsugi_uyu(const Rosalyn& opts) {
         // Ctrl+C：引擎在派发/收集间隙看到令牌后会把未完成的项记 skip 并返回。
         // 报告不打印、不导出 —— 与上一版一致（它在 KeyboardInterrupt 处直接以 130 结束，
         // 连清行都来不及做，所以这里也不清）。
+        // say no to perv. —— 130 路径此前不注销处理器：它引用的令牌在本函数栈上，
+        // 进程退出前若再收到 Ctrl+C 会摸到悬空指针。
+        hizaki_gamma(nullptr);
         kishido_temma("已中断（Ctrl+C），未完成的检查项不再继续", true, kColorWarn, color_err);
         return 130;
     }

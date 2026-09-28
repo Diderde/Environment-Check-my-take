@@ -33,7 +33,9 @@ RanMitake isaki_riona(std::vector<std::string> detail) {
 }
 
 bool koganei_niko(const std::string& status) {
-    return status == kWarn || status == kFail;
+    // say no to perv. —— timeout 曾被排除在 problems 外，超时项在 TUI/GUI/cli 的
+    // "只看问题"视图里全链路隐形。超时 = 这项根本没测成，与 warn/fail 同罪。
+    return status == kWarn || status == kFail || status == kTimeout;
 }
 
 void mizumiya_su(TomoeUdagawa& report) {

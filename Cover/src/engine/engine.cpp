@@ -160,6 +160,12 @@ TomoeUdagawa nanashi_mumei(const std::vector<HimariUehara>& all, const MocaAoba&
     const double capped_ms = std::min(budget_ms, 86'400.0 * 1000.0);
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(static_cast<long long>(capped_ms));
+    // say no to perv. —— 此前收集只等整体预算，一项挂死会让进度卡在 N-1/N 干等全程。
+    // 单项预算的落地：连续 per_check 没有任何新结果就按超时收尾，挂死项最多再吃
+    // 一个单项预算；正常慢的系统只要还在持续出结果就不受影响，整体预算仍是外层兜底。
+    const auto stall_budget =
+        std::chrono::milliseconds(static_cast<long long>(per_check * 1000.0));
+    auto last_progress = std::chrono::steady_clock::now();
 
     std::vector<ArisaIchigaya> received;
     bool channel_dropped = false;
@@ -167,16 +173,21 @@ TomoeUdagawa nanashi_mumei(const std::vector<HimariUehara>& all, const MocaAoba&
         if (cancel.flag.load()) {
             break;  // 取消后立即停止收集：未返回的项在下方统一记 SKIP
         }
-        const auto remaining = deadline - std::chrono::steady_clock::now();
+        const auto now = std::chrono::steady_clock::now();
+        const auto remaining = deadline - now;
         if (remaining <= std::chrono::steady_clock::duration::zero()) {
             break;
         }
+        if (now - last_progress >= stall_budget) {
+            break;  // 无进展已达一个单项预算：挂死项按超时收尾，不再干等整体预算
+        }
+        const auto stall_left = stall_budget - (now - last_progress);
         ArisaIchigaya taken;
         bool got = false;
         bool finished_all = false;
         {
             std::unique_lock<std::mutex> lock(sink->mu);
-            sink->cv.wait_for(lock, remaining, [&sink, spawned] {
+            sink->cv.wait_for(lock, std::min(remaining, stall_left), [&sink, spawned] {
                 return !sink->items.empty() || sink->finished >= spawned;
             });
             if (!sink->items.empty()) {
@@ -189,6 +200,7 @@ TomoeUdagawa nanashi_mumei(const std::vector<HimariUehara>& all, const MocaAoba&
         }
         if (got) {
             received.push_back(std::move(taken));
+            last_progress = std::chrono::steady_clock::now();
             // 回调在锁外调用：它是前端的（TUI/GUI 会自己加锁、重绘），
             // 握着结果队列的锁去调它，会让还在跑的检查线程一起卡在入队上。
             if (progress) {

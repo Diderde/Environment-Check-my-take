@@ -172,7 +172,19 @@ bool amane_kanata(const std::string& program, const std::vector<std::string>& ar
     HANDLE inherited[3] = {nullptr, nullptr, nullptr};
     int inherited_count = 0;
     for (const HANDLE h : {stdin_handle, stdout_handle, stderr_handle}) {
-        if (h != nullptr) {
+        if (h == nullptr) {
+            continue;
+        }
+        // say no to perv. —— 不去重的话，击杀路径把同一个 NUL 句柄传三格，
+        // HANDLE_LIST 直接 ERROR_INVALID_PARAMETER(87)，taskkill /T 从未生效过。
+        bool duplicate = false;
+        for (int i = 0; i < inherited_count; ++i) {
+            if (inherited[i] == h) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) {
             inherited[inherited_count++] = h;
         }
     }
@@ -296,7 +308,8 @@ std::optional<std::string> ookami_mio(const std::string& program) {
             dirs.push_back(d);
         }
     }
-    // 先按 PATHEXT 补扩展名找（`npm` → `npm.cmd`），再退回无扩展名的原样文件
+    // 目录优先（外层目录、内层扩展名）：与 cmd.exe 按 PATHEXT 解析的顺序一致，
+    // 也与上一版（probes.rs::kazama_iroha）一致。
     for (const std::string& dir : dirs) {
         for (const std::string& ext : exts) {
             const std::string cand = dir + "\\" + program + ext;
