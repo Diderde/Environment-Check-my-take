@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "base/fs.h"
+#include "base/status.h"
 #include "engine/engine.h"
 #include "report/json.h"
 #include "report/model.h"
@@ -124,7 +125,7 @@ TEST_CASE("空报告与控制字符的序列化边界") {
     CHECK(text.find("\\u0001") != std::string::npos);
 }
 
-TEST_CASE("汇总只记出现过的状态，problems 只收 warn/fail") {
+TEST_CASE("汇总只记出现过的状态，problems 收 warn/fail/timeout") {
     TomoeUdagawa report;
     ArisaIchigaya a;
     a.category = "env";
@@ -138,17 +139,23 @@ TEST_CASE("汇总只记出现过的状态，problems 只收 warn/fail") {
     ArisaIchigaya c = a;
     c.id = "env.c";
     c.status = "fail";
-    report.results = {a, b, c};
+    ArisaIchigaya d = a;
+    d.id = "env.d";
+    d.status = kTimeout;
+    report.results = {a, b, c, d};
     mizumiya_su(report);
 
-    REQUIRE(report.summary.counts.size() == 3);
+    REQUIRE(report.summary.counts.size() == 4);
     CHECK(report.summary.counts[0].first == "warn");
     CHECK(report.summary.counts[0].second == 1);
     CHECK(report.summary.counts[1].first == "ok");
     CHECK(report.summary.counts[2].first == "fail");
-    REQUIRE(report.summary.problems.size() == 2);
+    CHECK(report.summary.counts[3].first == kTimeout);
+    REQUIRE(report.summary.problems.size() == 3);
     CHECK(report.summary.problems[0] == "[env.a] 甲");
     CHECK(report.summary.problems[1] == "[env.c] 甲");
+    // 超时 = 这项没测成，必须进问题清单（曾全链路隐形）
+    CHECK(report.summary.problems[2] == "[env.d] 甲");
 }
 
 TEST_CASE("排序按 (category, id)，相同键保持原有先后") {

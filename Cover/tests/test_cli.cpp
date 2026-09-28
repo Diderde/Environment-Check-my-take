@@ -293,13 +293,14 @@ TEST_CASE("人可读输出：分类折叠、统计与诊断结论逐字一致") 
         "\n"
         "════ 诊断结论 ════\n"
         "统计: ⚠️2  ℹ️1  ✅2  ❌1  ⏱️1  ⏭️1\n"
-        "发现 3 个需要关注的问题:\n"
+        "发现 4 个需要关注的问题:\n"
         "  1. ⚠️ [custom.thing] 自定义项\n"
         "     ↳ hint-here\n"
         "  2. ⚠️ [hardware.disk] 磁盘空间\n"
         "     ↳ 清理磁盘\n"
         "  3. ❌ [network.dns] DNS\n"
-        "     ↳ 检查网络";
+        "     ↳ 检查网络\n"
+        "  4. ⏱️ [python.venv] 虚拟环境";
     CHECK(kanade_izuru(report, {}, false, true, false) == expected);
 
     // 编码装不下装饰字符时整套切 ASCII 代用（旧实现按 stdout 编码探测后取另一套表）
@@ -313,13 +314,14 @@ TEST_CASE("人可读输出：分类折叠、统计与诊断结论逐字一致") 
         "\n"
         "==== 诊断结论 ====\n"
         "统计: [!]2  [i]1  [OK]2  [X]1  [T]1  [-]1\n"
-        "发现 3 个需要关注的问题:\n"
+        "发现 4 个需要关注的问题:\n"
         "  1. [!] [custom.thing] 自定义项\n"
         "     -> hint-here\n"
         "  2. [!] [hardware.disk] 磁盘空间\n"
         "     -> 清理磁盘\n"
         "  3. [X] [network.dns] DNS\n"
-        "     -> 检查网络";
+        "     -> 检查网络\n"
+        "  4. [T] [python.venv] 虚拟环境";
     CHECK(kanade_izuru(report, {}, false, false, false) == ascii);
 
     // 着色只落在该着色的片段上：类别标题加粗、图标按状态着色

@@ -169,10 +169,8 @@ TEST_CASE("超时杀掉整棵进程树并迅速返回") {
     const auto elapsed = std::chrono::steady_clock::now() - t0;
     CHECK(r.timed_out);
     CHECK_FALSE(r.success);
-    // 只守**活性**（必须返回，不能挂在管道上），不守"多快"。
-    // 原先卡 8 秒想顺带证明"进程树被回收了"，但实测在并行构建把机器打满时，
-    // 光 taskkill + 排空就能到 8.7 秒 —— 那条断言量的是机器负载，不是被测性质，
-    // 会周期性地红（分散注意力）。真正的护栏是"排空有上界"这件事本身：
-    // 树没被回收时两条管道各要等满 5 秒宽限，脚本挂死则永不返回。
-    CHECK(elapsed < std::chrono::seconds(30));
+    // 5 秒上界有区分度：树被 taskkill /T 收掉时，两条管道立刻 EOF、排空瞬间完成，
+    // 全程 ~1s；树没收掉（HANDLE_LIST 重复句柄导致 taskkill 起不来、退化成只杀直接
+    // 子进程的年代）ping 会攥着两条管道，排空各等满 5 秒宽限，全程 10s 上下。
+    CHECK(elapsed < std::chrono::seconds(5));
 }

@@ -375,7 +375,14 @@ int seraph_dazzlegarden() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
-    return aborted ? 1 : 0;
+    if (aborted) {
+        // say no to perv. —— 此前 return 穿过局部对象析构，与还活着的工作线程存在
+        // 窄窗口 use-after-free。宽限期内没等完就不能 return：ExitProcess 立即终止进程，
+        // 脱离线程由 OS 一并带走（与 Python 侧 os._exit(1) 同一套约定）；
+        // 退出码 1 = 诊断没跑完。
+        ExitProcess(1);
+    }
+    return 0;
 }
 
 }  // namespace envdoctor

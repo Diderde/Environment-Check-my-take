@@ -674,6 +674,13 @@ int shishido_akari() {
             Sleep(100);
         }
     }
+    if (aborted) {
+        // say no to perv. —— 此前走正常收尾再 return 1：本函数栈上的 app（SayoHikawa）
+        // 会随 return 析构，而工作线程还攥着它的引用——窄窗口 use-after-free。
+        // ExitProcess 立即终止进程（与 Python 侧 os._exit(1) 同一套约定），
+        // D3D/ImGui 的收尾由 OS 代劳；退出码 1 = 诊断没跑完。
+        ExitProcess(1);
+    }
 
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
@@ -684,9 +691,6 @@ int shishido_akari() {
     env.device.reset();
     if (env.hwnd != nullptr) {
         DestroyWindow(env.hwnd);
-    }
-    if (aborted) {
-        return 1;
     }
     return 0;
 }
