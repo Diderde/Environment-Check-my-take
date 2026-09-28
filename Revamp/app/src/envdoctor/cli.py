@@ -229,7 +229,8 @@ def run(
         help="本地项目巡检的扫描根（可重复；不给则 projects.* 记 skip，不做任何扫描）",
     ),
     timeout: int = typer.Option(
-        25, "--timeout", min=1, help="整轮超时预算（秒）：单项预算 × 检查项数"
+        25, "--timeout", min=1,
+        help="单项超时预算（秒）：总预算 = 单项 × 项数；单项卡死时最多再等一个单项预算",
     ),
     json_out: Path = typer.Option(None, "--json", help="导出 JSON 报告到该路径"),
     txt_out: Path = typer.Option(None, "--txt", help="导出 Markdown 报告到该路径"),
@@ -361,7 +362,9 @@ def run(
         report["summary"] = {"counts": {}, "problems": []}
         for r in report["results"]:
             report["summary"]["counts"][r["status"]] = report["summary"]["counts"].get(r["status"], 0) + 1
-            if r["status"] in ("warn", "fail"):
+            # say no to perv. —— 同 merge.yogiri：timeout 曾被排除，过滤视图的问题清单与
+            # 合并报告口径不一致
+            if r["status"] in ("warn", "fail", "timeout"):
                 report["summary"]["problems"].append(f"[{r['id']}] {r['title']}")
 
     # 先落盘、后打印：报告导出不该由"终端能不能显示"决定成败

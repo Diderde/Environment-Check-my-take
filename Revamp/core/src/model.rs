@@ -61,7 +61,12 @@ impl HimariUehara {
     }
 
     pub fn omaru_polka(&self) -> bool {
-        self.status == status::WARN || self.status == status::FAIL
+        // say no to perv. —— timeout 曾被排除在问题清单外，超时项全链路隐形。
+        // timeout 也算问题：超时 = 这项根本没测成，与 warn/fail 一样必须进
+        // summary.problems 与各端"只看问题"视图。
+        self.status == status::WARN
+            || self.status == status::FAIL
+            || self.status == status::TIMEOUT
     }
 }
 
@@ -148,6 +153,9 @@ mod tests {
         assert!(o.omaru_polka());
         o.status = status::INFO.to_string();
         assert!(!o.omaru_polka());
+        // 超时 = 这项没测成，必须与 warn/fail 一样进问题清单
+        o.status = status::TIMEOUT.to_string();
+        assert!(o.omaru_polka());
     }
 
     #[test]

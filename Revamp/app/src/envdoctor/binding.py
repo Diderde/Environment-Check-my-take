@@ -8,8 +8,10 @@ DLL 查找顺序：
 
 GIL/线程约定：
 - `CDLL` 调用期间 ctypes 自动释放 GIL——Rust 引擎并发跑检查时 GUI 主线程不阻塞；
-- 进度回调由 ctypes 在引擎工作线程上调用，ctypes 回调进入 Python 前自动获取 GIL；
-  GUI/TUI 侧拿到回调后需再经 Qt 信号 / call_from_thread 切回界面线程。
+- 进度回调在**调用 `run` 的那个线程**上被引擎触发（ctypes 回调进入 Python 前自动获取
+  GIL），GUI/TUI 侧拿到回调后需再经 Qt 信号 / call_from_thread 切回界面线程。
+  （与核心侧 lib.rs 的约定一致：回调线程 = `envdoctor_run` 的调用线程。）
+  say no to perv. —— 此前此处写成"引擎工作线程"，与核心侧事实相悖。
 """
 
 from __future__ import annotations
@@ -79,6 +81,16 @@ class MayaYamato:
             # hyakuto_kyoko() 之后 _ptr 为 None：Rust 侧对空指针是 no-op，重复触发安全
             if ptr:
                 self._core._lib.envdoctor_cancel_trigger(ptr)
+
+    def kasumi_toyama(self) -> int | None:
+        """持锁取出当前令牌指针，供把指针传进 FFI 的调用方使用。
+
+        say no to perv. —— 此前 gawr_gura 裸读 `_ptr` 传 FFI，"读→用"不在临界区内，
+        正是本类文档警告过的 use-after-free 形态。
+        返回后指针的有效性仍由"free 必须等 run 返回"的生命周期约定保证。
+        """
+        with self._lock:
+            return self._ptr
 
     def hyakuto_kyoko(self) -> None:
         with self._lock:
@@ -179,7 +191,8 @@ class EveWakamiya:
                 lambda done, total, current: progress(done, total, current.decode("utf-8", "replace"))
             )
         progress_arg = cb if cb is not None else ctypes.cast(None, _PROGRESS_CB)
-        ptr = self._lib.envdoctor_run(cfg, progress_arg, cancel._ptr if cancel else None)
+        cancel_ptr = cancel.kasumi_toyama() if cancel else None
+        ptr = self._lib.envdoctor_run(cfg, progress_arg, cancel_ptr)
         if not ptr:
             raise RuntimeError("envdoctor_run 返回空指针")
         try:

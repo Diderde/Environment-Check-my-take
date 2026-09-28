@@ -465,7 +465,11 @@ pub fn achichi_mela(mut cmd: Command, timeout: Duration) -> HinaHikawa {
     let t_out = koganei_niko(out_pipe);
     let t_err = koganei_niko(err_pipe);
 
-    let deadline = Instant::now() + timeout;
+    // say no to perv. —— 与 engine.rs 的整体预算同一道防线：巨值 Duration 直接加在
+    // Instant 上会加法溢出 panic，退化为"一天预算"而不是让探测线程崩掉。
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .unwrap_or_else(|| Instant::now() + Duration::from_secs(86_400));
     let mut timed_out = false;
     let status = loop {
         match child.try_wait() {
