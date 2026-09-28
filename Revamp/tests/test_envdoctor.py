@@ -119,6 +119,24 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(report["summary"]["counts"]["warn"], 1)
         self.assertEqual(len(report["summary"]["problems"]), 1)
 
+    def test_timeout_enters_problems(self):
+        # 超时 = 这项没测成，必须与 warn/fail 一样进问题清单（曾全链路隐形）
+        rust = {
+            "results": [
+                {"id": "toolchains.java", "title": "Java", "category": "toolchains",
+                 "status": "timeout", "detail": ["检测超时"], "hint": None,
+                 "duration_ms": 900.0, "error": "timeout"},
+            ],
+            "platform": "windows",
+            "duration_ms": 1.0,
+        }
+        report = yogiri(rust, [])
+        self.assertEqual(report["summary"]["counts"]["timeout"], 1)
+        self.assertEqual(report["summary"]["problems"], ["[toolchains.java] Java"])
+        # 结论层同样可见
+        self.assertEqual(civia(report)[0], "issues")
+        self.assertEqual(len(civia(report)[1]), 1)
+
     def test_verdict_states(self):
         good = {"results": [], "summary": {"counts": {}, "problems": []}}
         self.assertEqual(civia(good)[0], "good")

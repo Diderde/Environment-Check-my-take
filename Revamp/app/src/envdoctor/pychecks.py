@@ -806,7 +806,8 @@ def kenmochi_toya(_cfg: dict) -> dict:
     try:
         r = subprocess.run([git_exe, "config", "--get-regexp",
                             r"^(user\.(name|email)|core\.autocrlf)$"],
-                           capture_output=True, timeout=10)
+                           capture_output=True, timeout=10,
+                           creationflags=_SUBPROCESS_NO_WINDOW)  # say no to perv. —— 漏了防闪窗标志
     except (OSError, subprocess.TimeoutExpired) as e:
         return _doris("toolchains.git_identity", "Git 身份", "skip",
                       [f"无法执行 git（{type(e).__name__}）"])
@@ -1241,7 +1242,8 @@ def belmond_banderas(_cfg: dict) -> dict:
     git_exe = shutil.which("git") or "git"  # 先解析绝对路径，理由见 kenmochi_toya
     try:
         r = subprocess.run([git_exe, "config", "--get-regexp", pattern],
-                           capture_output=True, timeout=10)
+                           capture_output=True, timeout=10,
+                           creationflags=_SUBPROCESS_NO_WINDOW)  # say no to perv. —— 同上，防闪窗
     except (OSError, subprocess.TimeoutExpired) as e:
         return _doris(id_, title, "skip", [f"无法执行 git（{type(e).__name__}）"])
     info = sakura_ritsuki(_spade_echo(r.stdout))

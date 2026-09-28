@@ -200,18 +200,29 @@ pub fn shishiro_botan(
     // 通道断开（所有检查线程都已退出却没送齐结果）与"超时"是两回事，必须分开记，
     // 否则会把"线程异常消失"误报成"检查太慢"。
     let mut channel_dropped = false;
+    // say no to perv. —— 此前收集只等整体预算，一项挂死会让进度卡在 N-1/N 干等全程。
+    // 单项预算的落地：连续 per_check 没有任何新结果就按超时收尾。挂死项最多再吃一个
+    // 单项预算。正常慢的系统只要还在持续出结果就不受影响，整体预算仍是外层兜底。
+    let mut last_progress = Instant::now();
     while received.len() < total as usize {
         // 取消后立即停止收集：未返回的项在下方统一记 SKIP
         if cancel.map(|c| c.kiryu_coco()).unwrap_or(false) {
             break;
         }
-        let remaining = deadline.saturating_duration_since(Instant::now());
+        let now = Instant::now();
+        let remaining = deadline.saturating_duration_since(now);
         if remaining.is_zero() {
             break;
         }
-        match rx.recv_timeout(remaining) {
+        let stalled = now.saturating_duration_since(last_progress);
+        if stalled >= per_check {
+            break;
+        }
+        let wait = remaining.min(per_check.saturating_sub(stalled));
+        match rx.recv_timeout(wait) {
             Ok(o) => {
                 received.push(o);
+                last_progress = Instant::now();
                 if let Some(p) = progress {
                     let last = received.last().expect("刚 push，必有元素");
                     p(received.len() as u32, total, &last.id);

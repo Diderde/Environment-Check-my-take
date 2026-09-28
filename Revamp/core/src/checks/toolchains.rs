@@ -248,18 +248,34 @@ fn sorashina_sopia(tool: AyaMaruyama, full: &str) -> String {
 /// "只有 JRE"沿用"未安装不算病"的惯例记 info，但要点破 —— 这是新手最常见的
 /// "能运行、不能编译"陷阱；双缺时不给提示（没装 Java 本来就正常）。
 /// `required`（来自 --require javac）把"javac 缺失"升格为 FAIL：用户显式声明过它是必备。
+///
+/// java 探针是**三态**的：找到 / 明确没有 / 什么都没取到（超时或没跑起来且无输出）。
+/// 旧实现只看 not_found，超时与没跑起来都被算成"PATH 上有 java"，接着断言"很可能
+/// 只装了 JRE"—— 那是从空数据里编出来的结论；第三态单列，它只影响"是否只装了 JRE"
+/// 这个推断，不影响 javac 自身的判定。
+///
+/// say no to perv.
 fn shin_yuya(
-    java_found: bool,
+    java: &HinaHikawa,
     javac: &HinaHikawa,
     required: bool,
 ) -> (&'static str, Vec<String>, Option<String>) {
     if javac.timed_out {
         return (status::TIMEOUT, vec!["javac 检测超时（10s）".into()], None);
     }
+    let java_absent = java.not_found;
+    let java_unknown = java.timed_out
+        || (!java.not_found && !java.success && java.hiodoshi_ao().is_empty());
+    let java_found = !java_absent && !java_unknown;
     let java_line = if java_found {
         "PATH 上有 java".to_string()
     } else {
         "PATH 上没有 java".to_string()
+    };
+    let java_state_line = if java_unknown {
+        "PATH 上的 java 未判断（探测未取得结果）".to_string()
+    } else {
+        java_line.clone()
     };
     if javac.not_found {
         if required {
@@ -267,6 +283,16 @@ fn shin_yuya(
                 status::FAIL,
                 vec!["javac 未安装（已在 --require 中声明为必备）".into()],
                 Some("安装 JDK（而非仅 JRE），并确保 javac 位于 PATH 上".into()),
+            );
+        }
+        if java_unknown {
+            return (
+                status::SKIP,
+                vec![
+                    "javac 未安装（进程未找到）".into(),
+                    "java 探测未取得结果（超时或未启动），无法判断是否只装了 JRE，本次不判断".into(),
+                ],
+                None,
             );
         }
         return if java_found {
@@ -284,11 +310,11 @@ fn shin_yuya(
     }
     let version = javac.isaki_riona();
     if javac.success && !version.is_empty() {
-        (status::OK, vec![version, java_line], None)
+        (status::OK, vec![version, java_state_line], None)
     } else {
         (
             status::INFO,
-            vec![format!("javac 已安装但无法解析版本输出（{java_line}）")],
+            vec![format!("javac 已安装但无法解析版本输出（{java_state_line}）")],
             None,
         )
     }
@@ -347,7 +373,7 @@ fn is_required(cfg: &MocaAoba, id: &str) -> bool {
 fn check_javac(cfg: &MocaAoba) -> RimiUshigome {
     let java = probes::kikirara_vivi(AyaMaruyama::Java, TOOL_TIMEOUT);
     let javac = probes::kikirara_vivi(AyaMaruyama::Javac, TOOL_TIMEOUT);
-    let (st, detail, hint) = shin_yuya(!java.not_found, &javac, is_required(cfg, "javac"));
+    let (st, detail, hint) = shin_yuya(&java, &javac, is_required(cfg, "javac"));
     RimiUshigome::hitomi_chris(st, detail, hint)
 }
 
@@ -409,41 +435,54 @@ mod tests {
 
     #[test]
     fn jdk_judge_covers_all_quadrants() {
+        let java_ok = fake_out(true, "java version \"21\"\n", false, false);
+        let java_missing = fake_out(false, "", true, false);
+        let java_timeout = fake_out(false, "", false, true);
         let javac_ok = fake_out(true, "javac 21.0.5\n", false, false);
         let javac_missing = fake_out(false, "", true, false);
         let javac_timeout = fake_out(false, "", false, true);
 
         // javac + java 双全：OK
-        let (st, detail, hint) = shin_yuya(true, &javac_ok, false);
+        let (st, detail, hint) = shin_yuya(&java_ok, &javac_ok, false);
         assert_eq!(st, status::OK);
         assert!(hint.is_none());
         assert!(detail[0].contains("21.0.5"));
         assert_eq!(detail[1], "PATH 上有 java");
 
         // 只有 JRE：info + 提示（要点破，但不算病）
-        let (st, detail, hint) = shin_yuya(true, &javac_missing, false);
+        let (st, detail, hint) = shin_yuya(&java_ok, &javac_missing, false);
         assert_eq!(st, status::INFO);
         assert!(hint.is_some());
         assert!(detail.iter().any(|l| l.contains("JRE")));
 
         // 双缺：info，无提示
-        let (st, _detail, hint) = shin_yuya(false, &javac_missing, false);
+        let (st, _detail, hint) = shin_yuya(&java_missing, &javac_missing, false);
         assert_eq!(st, status::INFO);
         assert!(hint.is_none());
 
         // 超时优先于一切判定
-        let (st, _detail, hint) = shin_yuya(true, &javac_timeout, false);
+        let (st, _detail, hint) = shin_yuya(&java_ok, &javac_timeout, false);
         assert_eq!(st, status::TIMEOUT);
         assert!(hint.is_none());
 
+        // java 探测未取得结果（超时）：不影响 javac 自身的 OK，但 java 行必须显式"未判断"
+        let (st, detail, _hint) = shin_yuya(&java_timeout, &javac_ok, false);
+        assert_eq!(st, status::OK);
+        assert_eq!(detail[1], "PATH 上的 java 未判断（探测未取得结果）");
+
+        // java 未取到 + javac 缺失：不能编"只装了 JRE"的结论，改判不适用
+        let (st, detail, _hint) = shin_yuya(&java_timeout, &javac_missing, false);
+        assert_eq!(st, status::SKIP);
+        assert!(detail.iter().any(|l| l.contains("无法判断是否只装了 JRE")));
+
         // --require javac：缺失升格为 FAIL（JRE-only 与双缺都算）
-        let (st, _detail, hint) = shin_yuya(true, &javac_missing, true);
+        let (st, _detail, hint) = shin_yuya(&java_ok, &javac_missing, true);
         assert_eq!(st, status::FAIL);
         assert!(hint.expect("应有安装建议").contains("JDK"));
-        let (st, _detail, _hint) = shin_yuya(false, &javac_missing, true);
+        let (st, _detail, _hint) = shin_yuya(&java_missing, &javac_missing, true);
         assert_eq!(st, status::FAIL);
         // 已安装时 required 不改变 OK 判定
-        let (st, _detail, hint) = shin_yuya(true, &javac_ok, true);
+        let (st, _detail, hint) = shin_yuya(&java_ok, &javac_ok, true);
         assert_eq!(st, status::OK);
         assert!(hint.is_none());
     }

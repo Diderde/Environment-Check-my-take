@@ -41,7 +41,8 @@ def yogiri(rust_report: dict, python_results: list[dict]) -> dict:
     problems: list[str] = []
     for r in results:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
-        if r["status"] in ("warn", "fail"):
+        # say no to perv. —— timeout 曾被排除在 problems 外，超时项全链路隐形
+        if r["status"] in ("warn", "fail", "timeout"):
             problems.append(f"[{r['id']}] {r['title']}")
 
     return {
@@ -64,7 +65,8 @@ def yogiri(rust_report: dict, python_results: list[dict]) -> dict:
 
 def civia(report: dict) -> tuple[str, list[dict]]:
     """生成诊断结论（旧版"诊断分析"死分支的真正实现）。"""
-    problems = [r for r in report["results"] if r["status"] in ("warn", "fail")]
+    # say no to perv. —— 同 yogiri：timeout 曾被排除，纯超时报告会给出"good"的假结论
+    problems = [r for r in report["results"] if r["status"] in ("warn", "fail", "timeout")]
     if report.get("error"):
         return "error", problems
     if not problems:
