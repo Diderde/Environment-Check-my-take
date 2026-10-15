@@ -17,7 +17,8 @@ jobs:
       # 依赖（fmt / doctest，以及前端用的 ftxui / Dear ImGui / WIL）由 CMake FetchContent
       # 现场拉取，版本在 Cover/CMakeLists.txt 里钉死，仓库里不存源码副本。
       - name: 配置（默认形态：含 TUI/GUI）
-        run: cmake -S Cover -B Cover/build-ci -G "Visual Studio 17 2022" -A x64
+        # 不钉 -G：镜像的 VS 大版本会演进，交给 CMake 自选可用实例，-A 指定 x64。
+        run: cmake -S Cover -B Cover/build-ci -A x64
       - name: 构建
         run: cmake --build Cover/build-ci --config Release
       - name: 单元测试
