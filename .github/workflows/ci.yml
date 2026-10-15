@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, Cover-C++]
     paths: ["Cover/**", "README.md", "THIRD_PARTY_LICENSES.md", ".github/workflows/**"]
   pull_request:
     paths: ["Cover/**", "README.md", "THIRD_PARTY_LICENSES.md", ".github/workflows/**"]
