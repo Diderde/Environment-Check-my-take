@@ -2,7 +2,8 @@ name: ci
 
 on:
   push:
-    branches: [main, Cover-C++]
+    # 分支名 Cover-C++ 含 +，触发器的 branches 过滤无法安全表达；本文件只存在于
+    # Cover-C++ 分支（main 上的同名文件是 Revamp 版），push 无需再按分支过滤。
     paths: ["Cover/**", "README.md", "THIRD_PARTY_LICENSES.md", ".github/workflows/**"]
   pull_request:
     paths: ["Cover/**", "README.md", "THIRD_PARTY_LICENSES.md", ".github/workflows/**"]
