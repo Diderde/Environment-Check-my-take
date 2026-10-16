@@ -19,10 +19,10 @@
 #include <chrono>
 #include <cstdio>
 #include <mutex>
-#include <processthreadsapi.h>
 #include <string>
 #include <thread>
 #include <vector>
+#include <windows.h>
 
 #include "base/status.h"
 #include "engine/engine.h"
