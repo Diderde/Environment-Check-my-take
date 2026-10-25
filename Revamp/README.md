@@ -132,3 +132,6 @@ cargo test --release      # Rust 核心（模型/引擎/注册表/探测）
 ## 许可
 
 MIT（与本仓库 LICENSE 一致）。
+
+第三方依赖另行声明：GUI 所用的 PySide6 以 LGPL-3.0（或 GPL-3.0 / 商业许可，任选其一）分发，
+许可证全文与说明见仓库根目录的 [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md)。
