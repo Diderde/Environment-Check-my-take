@@ -11,7 +11,6 @@
 
 | 组件 | 版本 | 许可 | 用途 | 上游 |
 |---|---|---|---|---|
-| {fmt} | 11.0.2 | MIT | 文本格式化（构建期拉取） | https://github.com/fmtlib/fmt |
 | doctest | v2.4.11 | MIT | 单元测试框架（仅测试目标链接，不进产物） | https://github.com/doctest/doctest |
 | FTXUI | v6.1.9 | MIT | 终端界面（TUI） | https://github.com/ArthurSonzogni/FTXUI |
 | Dear ImGui | v1.92.9b | MIT | 图形界面（GUI）的即时模式控件库 | https://github.com/ocornut/imgui |
@@ -25,6 +24,8 @@
 - 图形界面使用的 D3D11 / DXGI / D3DCompiler / comdlg32 / user32 / gdi32 / dwmapi 均随 Windows SDK
   提供，属操作系统组件，不单独列出。
 - MSVC 运行时（`vcruntime`/`msvcp` 等）随 Visual Studio 分发，按微软的再分发条款使用。
+- 若将来发布包含这些组件的二进制产物，需随附各组件的 `LICENSE` 文本——MIT 要求在副本中保留
+  版权与许可声明——可从 `FetchContent` 拉取的源码树（`Cover/.deps/`）中取得。
 
 ## 关于被替换掉的旧实现
 

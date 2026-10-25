@@ -20,15 +20,11 @@ set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.deps" CACHE PATH "依赖
 
 include(FetchContent)
 
-FetchContent_Declare(fmt
-  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-  GIT_TAG        11.0.2
-  GIT_SHALLOW    TRUE)
 FetchContent_Declare(doctest
   GIT_REPOSITORY https://github.com/doctest/doctest.git
   GIT_TAG        v2.4.11
   GIT_SHALLOW    TRUE)
-FetchContent_MakeAvailable(fmt doctest)
+FetchContent_MakeAvailable(doctest)
 
 # 统一编译选项。`/utf-8` 是必需的：源码里全是中文注释与中文字面量，
 # MSVC 默认按系统 ANSI 代码页读源文件，不加会把中文读坏并报 C4819。
@@ -48,7 +44,6 @@ add_library(envdoctor_base STATIC
   src/base/win32.cpp)
 target_include_directories(envdoctor_base PUBLIC src)
 target_link_libraries(envdoctor_base
-  PUBLIC fmt::fmt
   PRIVATE envdoctor_flags)
 
 # Windows 平台层：注册表、外部工具白名单。
